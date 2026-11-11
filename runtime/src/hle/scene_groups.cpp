@@ -46,3 +46,36 @@ extern "C" void ScnGroup_Construct_8006e390(CpuContext* ctx) {
     MKW_GUEST_NEXT(8006E390)(ctx);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8006E390, ScnGroup_Construct_8006e390, "ScnGroup_Construct_8006e390");
+
+// ScnMgr::InitImpl (0x80562180) builds the scene's root with nw4r::g3d::ScnRoot::Construct
+// (0x8006F1A0: allocator, u32* size, max children, max gathered scene objects, lights...) and a
+// fixed 768 / 768. The second is the size of the per-frame draw lists (opaque and translucent)
+// that ScnRoot::GatherDrawScnObj fills with every visible object; past it, objects are silently
+// not drawn. With 100 racers in front of the camera their karts, drivers, wheels and shadows took
+// all 768 places and the course models after them were dropped (the track vanished looking
+// forward and came back looking backward). Both are scaled by players / 12 like the groups.
+namespace {
+bool gInScnMgrInit = false;  // game thread only
+constexpr uint32_t kScnRootStockObjects = 768;  // the constants in 0x80562180
+} // namespace
+
+extern "C" void ScnMgr_InitImpl_80562180(CpuContext* ctx) {
+    gInScnMgrInit = true;
+    MKW_GUEST_NEXT(80562180)(ctx);
+    gInScnMgrInit = false;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80562180, ScnMgr_InitImpl_80562180, "ScnMgr_InitImpl_80562180");
+
+extern "C" void ScnRoot_Construct_8006f1a0(CpuContext* ctx) {
+    const uint32_t players = ScnPlayerCount();
+    if (gInScnMgrInit && players > kScnStockPlayers) {
+        if (ctx->gpr[5] == kScnRootStockObjects) {
+            ctx->gpr[5] = kScnRootStockObjects * players / kScnStockPlayers;
+        }
+        if (ctx->gpr[6] == kScnRootStockObjects) {
+            ctx->gpr[6] = kScnRootStockObjects * players / kScnStockPlayers;
+        }
+    }
+    MKW_GUEST_NEXT(8006F1A0)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8006F1A0, ScnRoot_Construct_8006f1a0, "ScnRoot_Construct_8006f1a0");

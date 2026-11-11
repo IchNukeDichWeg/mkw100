@@ -42,6 +42,9 @@ inline constexpr uint32_t kShadowSize = kClassSpan * kMaxClasses;
 inline constexpr uint32_t kNativeTables = kShadowBase + (kMaxClasses - 1) * kClassSpan;
 // Its second half: runtime strings handed to the menu text lookup (vs_racers_option.cpp).
 inline constexpr uint32_t kMenuText = kNativeTables + kClassSpan / 2;
+// Two spans before the native tables hold the position icons (rank_icons.cpp); class ids stay below.
+inline constexpr uint32_t kRankIcons = kShadowBase + (kMaxClasses - 3) * kClassSpan;
+inline constexpr uint32_t kRankIconsSize = 2 * kClassSpan;
 
 inline constexpr uint32_t kNoArray = 0xFFFFFFFF;
 
@@ -96,7 +99,7 @@ constexpr bool ValidTable() {
             return false;
         }
     }
-    return std::size(kClasses) < kMaxClasses;  // the last span is kNativeTables
+    return std::size(kClasses) < kMaxClasses - 3;  // the last three spans: rank icons, native tables
 }
 static_assert(ValidTable(), "class ids must be 1..n in order, and the windows must fit the span");
 

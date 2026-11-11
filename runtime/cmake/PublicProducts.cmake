@@ -277,6 +277,11 @@ function(mkw_configure_product target)
         "${MKW_INITIAL_PIPELINE_CACHE}"
         "$<TARGET_FILE_DIR:${target}>/initial_pipeline_cache.db" VERBATIM)
 
+    # mkw100 position icons 13th..128th (runtime/src/hle/rank_icons.cpp; credits in the README).
+    add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${MKW_RUNTIME_SOURCE_DIR}/assets/rank_icons"
+        "$<TARGET_FILE_DIR:${target}>/rank_icons" VERBATIM)
+
     # Non-Windows TLS (runtime/src/hle/net/network_ssl.cpp's mbed TLS path) needs a trusted root
     # CA bundle to verify server certificates against - Windows gets this for free from the OS via
     # Schannel, mbed TLS does not ship one itself. Not SHA256-pinned like the DSP ROM above: unlike

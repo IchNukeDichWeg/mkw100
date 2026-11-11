@@ -204,6 +204,13 @@ Not code, but the documentation this project depends on:
   ([thread](https://mariokartwii.com/showthread.php?tid=2674),
   [source](https://github.com/RoGamer97/My-Cheat-Code-Collection_ASM-Hacks)) - a Gecko code;
   `runtime/src/hle/item_cycler.cpp` reimplements its behaviour natively (no code copied).
+- Position icons 13th-24th by hammerbro101,
+  ["Wii - Mario Kart Wii - Positions (24 Players)"](https://www.deviantart.com/hammerbro101/art/Wii---Mario-Kart-Wii---Positions-%2824-Players%29-1281677667)
+  (fan art), in `runtime/assets/rank_icons/rank013.tpl`-`rank024.tpl`. 25th-128th are generated
+  in the same style; 1st-12th are the game's own and are not included.
+- Team colours and the approach of tinting existing UI for more than two teams follow Retro
+  Rewind's extended teams ([rr-pulsar](https://github.com/Retro-Rewind-Team/rr-pulsar),
+  `PulsarEngine/UI/ExtendedTeamSelect`, GPL-3, with Pulsar and MKW-SP under MIT).
 
 ---
 

@@ -6,6 +6,7 @@
 #include "guest_abi/player_slots.h"
 #include "hle/custom_messages.h"
 #include "hle/teams.h"
+#include "hle/rank_icons.h"
 #include "memory.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -47,6 +48,7 @@ uint32_t ParseKey(const std::optional<std::string>& value, const std::array<cons
 }
 std::atomic<uint32_t> hudRank{0};
 std::atomic<int64_t> hudTime{0};
+std::atomic<bool> hudIcons{false};  // the race counter shows a rank icon; the overlay only shows game speed
 std::atomic<uint32_t> simulationRate{0};
 int64_t NowMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 uint32_t seriesCount = 0;
@@ -272,6 +274,16 @@ void DrawHud() {
     const uint32_t rank = packed & 255, count = packed >> 8;
     const auto* vp=ImGui::GetMainViewport();
     ImDrawList* list = ImGui::GetForegroundDrawList();
+    if (hudIcons.load()) {  // the game's counter shows the place; keep the game speed readout
+        const uint32_t rate = simulationRate.load();
+        if (rate) {
+            char speed[32];
+            std::snprintf(speed, sizeof speed, "Game speed %u%%", rate*100/60);
+            list->AddText(ImVec2(vp->Pos.x + vp->Size.x*0.96f - ImGui::CalcTextSize(speed).x, vp->Pos.y + vp->Size.y*0.95f),
+                          IM_COL32(235,235,235,200), speed);
+        }
+        return;
+    }
     const float big = vp->Size.y * 0.13f, small = big * 0.38f;
     // Gold for 1st to 3rd, then from white-blue to deep blue towards last.
     const float f = count > 1 ? float(rank - 1) / float(count - 1) : 0.0f;
@@ -437,11 +449,13 @@ constexpr uint32_t kNumberMessage = 1313;       // FillScore's style message ("p
 constexpr uint32_t kIntegerMessage = 1314;      // Race.bmg: just integer 0 (the score's number)
 constexpr uint32_t kPointsPane = 0x808AA416;     // "get_point", the "+N" text box
 constexpr uint32_t kSignedMessage = 1315;       // Race.bmg: signed integer 0 ("+N")
+constexpr uint32_t kNamePane = 0x808AA39F;       // "player_name"
 uint32_t page = 0;       // the leaderboard page being scrolled, 0 when none
 bool standingsPage = false;
 uint32_t offset = 0;
 uint32_t count = 0;
 uint32_t repeat = 0;
+std::array<uint32_t, 12> rowPlayer{};  // racer shown in each row, for the team tint re-applied each frame
 
 uint32_t Control(uint32_t pg, uint32_t row) { return Memory::Read32(Memory::Read32(pg + 0x1A0) + 4 * row); }
 
@@ -496,19 +510,46 @@ void FillRaceRow(CpuContext* ctx, const CpuContext& saved, uint32_t pg, uint32_t
     if (animate) Call(ctx, saved, 0x807F579C, control, after - before, row == 0 ? 1 : 0);  // FillScoreDiff
     SetPaneMessage(ctx, saved, control, kPointsPane, kSignedMessage, e.earned);  // "+N" of this racer
     Call(ctx, saved, Memory::Read32(rd + 0xB70) == 0 ? 0x807F595C : 0x807F52F4, control, player);  // time or name
+    rowPlayer[row] = player;
+    Teams::TintResultRow(ctx, control, player);
+    *ctx = saved;
+}
+
+// A team row of the standings page: team place, its best racer's icon, team name, average.
+void FillTeamRow(CpuContext* ctx, const CpuContext& saved, uint32_t pg, uint32_t row, uint32_t place,
+                 const Teams::Standing& s, const std::vector<local_vs_detail::Entry>& rows) {
+    uint32_t best = 0;
+    for (const auto& e : rows) if (Teams::TeamOf(e.id) == s.team) { best = e.id; break; }  // rows: best total first
+    const uint32_t control = Control(pg, row);
+    FillPlace(ctx, saved, control, place, best);
+    Call(ctx, saved, 0x807F56D4, control, uint32_t(s.average + 0.5), kNumberMessage);  // FillScore: the average
+    Call(ctx, saved, 0x8063DEEC, control, kGetPointPane);
+    SetPaneMessage(ctx, saved, control, kNamePane, CustomMessages::TeamNameBmg(Teams::ColourIndexOf(s.team)), 0);
+    rowPlayer[row] = best;
+    Teams::TintResultRow(ctx, control, best);
+    *ctx = saved;
 }
 
 void FillStandingsRows(CpuContext* ctx, const CpuContext& saved, uint32_t pg,
                        const std::vector<local_vs_detail::Entry>& rows) {
-    for (uint32_t row = 0; row < kRows && offset + row < rows.size(); ++row) {
-        const auto& e = rows[offset + row];
+    const auto teams = Teams::Active() ? Teams::LastStandings() : std::vector<Teams::Standing>{};
+    for (uint32_t row = 0; row < kRows && offset + row < teams.size() + rows.size(); ++row) {
+        if (offset + row < teams.size()) {
+            FillTeamRow(ctx, saved, pg, row, offset + row + 1, teams[offset + row], rows);
+            continue;
+        }
+        const uint32_t index = offset + row - uint32_t(teams.size());
+        const auto& e = rows[index];
         const uint32_t control = Control(pg, row);
         const uint32_t entry = Memory::Read32(pg + 0x1A4) + 12 * row;
         Memory::Write32(entry, e.total); Memory::Write32(entry + 4, e.earned); Memory::Write8(entry + 8, e.id);
-        FillPlace(ctx, saved, control, offset + row + 1, e.id);
+        FillPlace(ctx, saved, control, index + 1, e.id);
         Call(ctx, saved, 0x807F56D4, control, e.total, kNumberMessage);
         Call(ctx, saved, 0x8063DEEC, control, kGetPointPane);  // as the game's standings page does
         Call(ctx, saved, 0x807F52F4, control, e.id);           // FillName
+        rowPlayer[row] = e.id;
+        Teams::TintResultRow(ctx, control, e.id);
+        *ctx = saved;
     }
 }
 
@@ -556,12 +597,13 @@ extern "C" void LocalVs_TotalRows_8085cae8(CpuContext* ctx) {
     const auto rows = StandingsByTotal();
     uint32_t mine = 0;
     for (uint32_t i = 0; i < rows.size(); ++i) if (rows[i].id == 0) mine = i + 1;
-    page = pg; standingsPage = true; count = uint32_t(rows.size()); repeat = 0;
+    page = pg; standingsPage = true; repeat = 0;
+    count = uint32_t(rows.size() + (Teams::Active() ? Teams::LastStandings().size() : 0));
     {
         const uint32_t rd = Memory::Read32(MKW_GADDR(809BD728));
         for (uint32_t i = 0; i < rows.size(); ++i) Memory::Write8(rd + MKW100_PlayerSlotOffset(rows[i].id) + 0xCF8, uint8_t(i + 1));
     }
-    offset = OffsetAround(mine, count);
+    offset = OffsetAround(mine + uint32_t(Teams::Active() ? Teams::LastStandings().size() : 0), count);
     const CpuContext saved = *ctx;
     FillStandingsRows(ctx, saved, pg, rows);
     *ctx = saved;
@@ -574,6 +616,11 @@ extern "C" void LocalVs_LeaderboardScroll_8085c0c4(CpuContext* ctx) {
     const uint32_t pg = ctx->gpr[3];
     MKW_GUEST_NEXT(8085C0C4)(ctx);
     if (pg != page || !local_vs_detail::ExpandedOffline()) return;
+    if (Teams::Active()) {  // the rows' own animations repaint them every frame
+        const CpuContext before = *ctx;
+        for (uint32_t row = 0; row < kRows && row < count; ++row) Teams::TintResultRow(ctx, Control(pg, row), rowPlayer[row]);
+        *ctx = before;
+    }
     if (count <= kRows) return;
     const CpuContext saved = *ctx;
     Call(ctx, saved, 0x805EEE0C, 0);  // ManipulatorManager::GetControllerHolder(0)
@@ -620,8 +667,9 @@ extern "C" void LocalVs_CupUnlocked_8054fc44(CpuContext* ctx) {
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8054FC44, LocalVs_CupUnlocked_8054fc44, "LocalVs_CupUnlocked_8054fc44");
 
-// The stock rank animation only contains twelve pictures. Publish a numeric HUD
-// on the game thread; the overlay never reads guest objects that may be destroyed.
+// The stock rank animation only contains twelve pictures. Past 12th the counter shows a rank icon
+// (rank_icons.cpp) when rank_icons/ is installed; otherwise the overlay draws the number. The
+// overlay never reads guest objects that may be destroyed.
 extern "C" void LocalVs_Rank_807f4a08(CpuContext* ctx) {
     const uint32_t self=ctx->gpr[3];
     MKW_GUEST_NEXT(807F4A08)(ctx);
@@ -632,7 +680,9 @@ extern "C" void LocalVs_Rank_807f4a08(CpuContext* ctx) {
     const uint32_t player=Memory::Read32(Memory::Read32(info+0xC)+4*id);
     const uint32_t rank=Memory::Read8(player+0x20);
     if (!rank || rank>local_vs_detail::RaceCount()) return;
-    Memory::Write8(self+0x80,1);
+    const bool icon=RankIcons::Show(ctx,self,rank);
+    local_vs_detail::hudIcons=icon;
+    if (!icon) Memory::Write8(self+0x80,1);  // no icon: hide the counter, the overlay draws the number
     local_vs_detail::hudRank=rank | (local_vs_detail::RaceCount()<<8);
     local_vs_detail::hudTime=local_vs_detail::NowMs();
 }

@@ -346,7 +346,7 @@ void SubmitAttribute(GXAttr attr, float* comps, const VtxAttrFmt& fmt, const u32
 // `val` is a raw big-endian bit pattern: the FIFO stream is type-agnostic, and
 // the float entry point converts before it gets here.
 void HleFifoWrite(u32 val, uint32_t sizeBytes) {
-    GxWorker::MarkVtxDescUnknown();
+    GxWorker::NoteFifoWrite(val, sizeBytes);
     const bool recordOnly = IsDisplayListActive();
     if (recordOnly) {
         WriteDisplayListData(val, sizeBytes);

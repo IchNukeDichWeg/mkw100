@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace {
 uint32_t CanonicalVtxAttr(uint32_t attr) {
@@ -49,8 +50,11 @@ bool ApiVtxArray(uint32_t attr, uint32_t& base, uint32_t& stride) {
 // change the descriptor from CP writes (FIFO writes, display lists: GxWorker::MarkVtxDescUnknown).
 // Measured: 33% of the calls had a FIFO write since the previous one and 0.3% a display list, so
 // about two thirds no longer wait.
+// The vertex attribute formats get the same game-thread copy under the same flag: once
+// GetVtxDesc stopped syncing, GetVtxAttrFmt became the call that waited (406 of the samples).
 namespace {
 GXAttrType s_gameVtxDesc[26] = {};
+VtxAttrFmt s_gameVtxAttrFmt[8][26] = {};
 
 void SetGameVtxDesc(uint32_t attr, uint32_t type, uint32_t rawAttr) {
     if (GxWorker::OnWorker() || attr >= 26 || attr == GX_VA_NULL) return;
@@ -58,14 +62,25 @@ void SetGameVtxDesc(uint32_t attr, uint32_t type, uint32_t rawAttr) {
     if (rawAttr == GX_VA_NBT) s_gameVtxDesc[GX_VA_NBT] = GX_NONE;
 }
 
-// The descriptor as the worker will see it at the next recorded command; game thread only.
-const GXAttrType* GameVtxDesc() {
+void SyncGameVertexState() {
     if (GxWorker::g_vtxDescUnknown || !GxWorker::Active()) {
         GX_SYNC_INLINE();
         for (uint32_t i = 0; i < 26; ++i) s_gameVtxDesc[i] = g_hleGxState.vtxDesc[i];
+        std::memcpy(s_gameVtxAttrFmt, g_hleGxState.vtxAttrFmt, sizeof s_gameVtxAttrFmt);
         GxWorker::g_vtxDescUnknown = false;
     }
+}
+
+// The descriptor as the worker will see it at the next recorded command; game thread only.
+const GXAttrType* GameVtxDesc() {
+    SyncGameVertexState();
     return s_gameVtxDesc;
+}
+
+// Likewise the attribute formats.
+const VtxAttrFmt (*GameVtxAttrFmt())[26] {
+    SyncGameVertexState();
+    return s_gameVtxAttrFmt;
 }
 } // namespace
 
@@ -151,8 +166,12 @@ PPC_NATIVE_OVERRIDE_VOID(8016dba4, GX__GetVtxDescv_8016dba4, (uint32_t la), (la)
 // ============================================================================
 
 extern "C" void GX__SetVtxAttrFmt_8016dc68(uint32_t vf, uint32_t a, uint32_t c, uint32_t t, uint32_t fr) {
-    GX_DEFER_CALL(GX__SetVtxAttrFmt_8016dc68, vf, a, c, t, fr);
     const uint32_t attr = CanonicalVtxAttr(a);
+    if (!GxWorker::OnWorker() && vf < 8 && attr < 26) {
+        s_gameVtxAttrFmt[vf][attr] = {(GXCompCnt)c, (GXCompType)t, (u8)fr};
+        if (a == GX_VA_NBT) s_gameVtxAttrFmt[vf][GX_VA_NBT] = {};
+    }
+    GX_DEFER_CALL(GX__SetVtxAttrFmt_8016dc68, vf, a, c, t, fr);
     if(vf<8&&attr<26){
         const VtxAttrFmt oldFmt = g_hleGxState.vtxAttrFmt[vf][attr];
         g_hleGxState.vtxAttrFmt[vf][attr].cnt=(GXCompCnt)c;
@@ -182,6 +201,7 @@ extern "C" void GX__SetVtxAttrFmtv_8016de08(uint32_t vf, uint32_t la) {
         list.push_back({a, Memory::Read32(p+4), Memory::Read32(p+8), Memory::Read8(p+12)});
         p+=16;
     }
+    GxWorker::MarkVtxDescUnknown();  // applied on the worker, past the game-thread copy
     GxWorker::Run([vf, list = std::move(list)] {
         for (const auto& [a, c, t, fr] : list) GX__SetVtxAttrFmt_8016dc68(vf, a, c, t, fr);
     });
@@ -189,11 +209,10 @@ extern "C" void GX__SetVtxAttrFmtv_8016de08(uint32_t vf, uint32_t la) {
 PPC_NATIVE_OVERRIDE_VOID(8016de08, GX__SetVtxAttrFmtv_8016de08, (uint32_t vf, uint32_t la), (vf, la));
 
 extern "C" void GX__GetVtxAttrFmt_8016e04c(uint32_t vf, uint32_t a, uint32_t cp, uint32_t tp, uint32_t fp) {
-    GX_SYNC_INLINE();
     VtxAttrFmt fmt{};
     const uint32_t attr = CanonicalVtxAttr(a);
     if (vf < 8 && attr < GX_VA_MAX_ATTR && attr != GX_VA_NULL) {
-        fmt = g_hleGxState.vtxAttrFmt[vf][attr];
+        fmt = GameVtxAttrFmt()[vf][attr];
     }
     if (cp) {
         Memory::Write32(cp, static_cast<uint32_t>(fmt.cnt));
@@ -211,13 +230,12 @@ extern "C" void GX__GetVtxAttrFmtv_8016e2b8(uint32_t vf, uint32_t la) {
     if (!la) {
         return;
     }
-    GX_SYNC_INLINE();
-
+    const auto formats = GameVtxAttrFmt();
     uint32_t p = la;
     for (uint32_t a = GX_VA_POS; a <= GX_VA_TEX7; ++a) {
         VtxAttrFmt fmt{};
         if (vf < 8) {
-            fmt = g_hleGxState.vtxAttrFmt[vf][a];
+            fmt = formats[vf][a];
         }
         Memory::Write32(p, a);
         Memory::Write32(p + 4, static_cast<uint32_t>(fmt.cnt));

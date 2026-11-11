@@ -106,7 +106,19 @@ struct Grid {
 // Interactive grids follow the course's linked CPU driving line backwards.
 // Checkpoint regions are not road boundaries: the benchmark's wide block grid
 // can legitimately fit its checkpoint test while placing a kart on grass.
-bool PlaceRoadGrid(uint32_t ktpt, uint32_t rank, uint32_t position, uint32_t rotation) {
+// Lanes per row: the 12-kart grid's own width at the line (known to be road) at about the old
+// 300-unit spacing, 3 to 6 lanes. The old 3-lane rows used under half of it, so 100 karts stood
+// 34 rows (12,250 units) deep; 6 lanes take 17 rows. Odd rows sit a quarter lane over so a kart
+// does not start straight behind another.
+constexpr float kGridLaneSpacing = 300.0f;
+constexpr float kGridRowDepth = 350.0f;
+constexpr uint32_t kGridMinLanes = 3;
+constexpr uint32_t kGridMaxLanes = 6;
+
+bool PlaceRoadGrid(uint32_t ktpt, uint32_t rank, uint32_t position, uint32_t rotation, float span) {
+    const uint32_t lanes = std::clamp(uint32_t(span / kGridLaneSpacing + 0.5f) + 1, kGridMinLanes, kGridMaxLanes);
+    const float spacing = std::max(span, kGridLaneSpacing * (kGridMinLanes - 1)) / float(lanes - 1);
+    const uint32_t row = (rank - 1) / lanes;
     const uint32_t manager = Memory::Read32(kKmpManager);
     const uint32_t section = manager ? Memory::Read32(manager + 0x10) : 0;
     if (!section) return false;
@@ -132,14 +144,14 @@ bool PlaceRoadGrid(uint32_t ktpt, uint32_t rank, uint32_t position, uint32_t rot
         if (error<best) { best=error; fraction=t; end=i; }
     }
     if (end==count) return false;
-    float remaining = 700.0f + float((rank-1)/3)*350.0f;
+    float remaining = 700.0f + float(row)*kGridRowDepth;
     for (uint32_t steps=0;steps<count;++steps) {
         const auto prev=previous(end); if (prev>=count) return false;
         const auto a=pointAt(prev), b=pointAt(end);
         const float dx=b[0]-a[0], dz=b[2]-a[2], length=std::sqrt(dx*dx+dz*dz);
         if (length>1 && remaining<=length*fraction) {
             const float t=fraction-remaining/length;
-            const float lateral=(int((rank-1)%3)-1)*300.0f;
+            const float lateral=(float((rank-1)%lanes)-float(lanes-1)/2.0f+(row%2 ? 0.25f : -0.25f))*spacing;
             Memory::WriteFloat32(position,a[0]+t*dx+lateral*dz/length);
             Memory::WriteFloat32(position+4,a[1]+t*(b[1]-a[1])+50.0f);
             Memory::WriteFloat32(position+8,a[2]+t*dz-lateral*dx/length);
@@ -208,9 +220,8 @@ extern "C" void KTPT_CalcCoordinates_80514b24(CpuContext* ctx) {
     ctx->gpr[7] = kGridKarts;
     const CpuContext entry = *ctx;
     MKW_GUEST_NEXT(80514B24)(ctx);
-    if (!BootRace::CpuDriven() && position &&
-        PlaceRoadGrid(Memory::Read32(holder), rank, position, rotation)) return;
-    if (block == 0 || position == 0) {
+    const bool road = !BootRace::CpuDriven();
+    if ((block == 0 && !road) || position == 0) {
         return;
     }
     const CpuContext after = *ctx;
@@ -242,6 +253,12 @@ extern "C" void KTPT_CalcCoordinates_80514b24(CpuContext* ctx) {
         const float across = grid.slots[i][0] * grid.sideX + grid.slots[i][2] * grid.sideZ;
         least = i == 0 || across < least ? across : least;
         most = i == 0 || across > most ? across : most;
+    }
+    if (road && PlaceRoadGrid(ktpt, rank, position, rotation, most - least)) {
+        return;
+    }
+    if (block == 0) {
+        return;  // no route found: ranks 1..12 keep the slot the game's function wrote
     }
     const float width = (most - least) * kGridColumns / (kGridColumns - 1);
     const GridVec& front = grid.slots[kGridFrontRank - 1];

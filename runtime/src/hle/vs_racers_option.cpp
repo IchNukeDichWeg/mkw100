@@ -11,7 +11,7 @@
 // Its label is the race count's own message (BMG 3450) swapped for "Racers" while the row loads,
 // by answering that one lookup from a runtime string (BMGHolder::GetMsgId 0x805F8C88,
 // GetMsgByMsgId 0x805F8CF0, GetFontIndex 0x805F8D2C). Its value uses message 3451, the number
-// the race count shows. Changes go to LocalVs::SetDesiredCount, the setting F10 > Local VS edits.
+// the race count shows; its help line swaps 3465 the same way. Changes go to LocalVs::SetDesiredCount, the setting F10 > Local VS edits.
 
 #include "abi_bridge.h"
 #include "guest_abi/array_overflow.h"
@@ -52,21 +52,29 @@ constexpr uint32_t kSetMessage = 0x8063DDB4;     // LayoutUIControl: control, bm
 constexpr uint32_t kLabelBmg = 3450;             // "Number of Races"
 constexpr uint32_t kValueBmg = 3451;             // the number in Text::Info intToPass[0]
 constexpr uint32_t kInjectedMsg = 0x7FFF;        // msg index no BMG file reaches
+constexpr uint32_t kHelpBmg = 3465;              // "Set the number of races."
+constexpr uint32_t kHelpMsg = 0x7FFE;
 constexpr float kRowStep = 20.0f;                // measured: 40 put the row two rows below Races
-constexpr float kOkDrop = 15.0f;
+constexpr float kOkDrop = 12.0f;
+constexpr float kOkScaleY = 0.85f;               // with the drop, keeps OK clear of both the row and the help bar
 
 // "Racers" as UTF-16BE in the fixed runtime table span. Its INF entry (font and attributes) is
 // the race count label's own: a zeroed entry selected a caps-only font.
 constexpr uint32_t kLabelText = ArrayOverflow::kMenuText;
 constexpr char kLabel[] = "Racers";
+constexpr uint32_t kHelpText = kLabelText + 0x40;
+constexpr char kHelp[] = "Set the number of racers.";
 
 bool gLoadingRow = false;     // game thread only: the row's layout is loading
 uint32_t gLabelMsg = 0;       // BMG msg index of kLabelBmg, for its INF entry
+bool gSettingHelp = false;    // game thread only: the row's help text is being set
+uint32_t gHelpMsgIndex = 0;
 uint32_t gRow = 0;            // the row's UpDownControl on the current page, 0 when none
 uint32_t gRowText = 0;
 
 void WriteLabel() {
     for (uint32_t i = 0; i < sizeof kLabel; ++i) Memory::Write16(kLabelText + i * 2, uint8_t(kLabel[i]));
+    for (uint32_t i = 0; i < sizeof kHelp; ++i) Memory::Write16(kHelpText + i * 2, uint8_t(kHelp[i]));
 }
 
 uint32_t Call(CpuContext* ctx, uint32_t function) {
@@ -185,7 +193,13 @@ REGISTER_NATIVE_WRAPPER_AS(0x808530B8, VsSettings_CreateControl_808530b8, "VsSet
 // The OK button, the page's only external control, moves below the new row.
 extern "C" void VsSettings_CreateExternalControl_80853028(CpuContext* ctx) {
     MKW_GUEST_NEXT(80853028)(ctx);
-    if (ctx->gpr[3] != 0) ShiftY(ctx->gpr[3], -kOkDrop);
+    const uint32_t ok = ctx->gpr[3];
+    if (ok == 0) return;
+    ShiftY(ok, -kOkDrop);
+    for (uint32_t i = 0; i < 4; ++i) {
+        const uint32_t scaleY = ok + 4 + i * 0x18 + 0x10;
+        Memory::WriteFloat32(scaleY, Memory::ReadFloat32(scaleY) * kOkScaleY);
+    }
 }
 REGISTER_NATIVE_WRAPPER_AS(0x80853028, VsSettings_CreateExternalControl_80853028, "VsSettings_CreateExternalControl_80853028");
 
@@ -211,7 +225,22 @@ extern "C" void VsSettings_OnTextChange_80853a10(CpuContext* ctx) {
 }
 REGISTER_NATIVE_WRAPPER_AS(0x80853A10, VsSettings_OnTextChange_80853a10, "VsSettings_OnTextChange_80853a10");
 
+// OnUpDownSelect(page, control, hudSlot) sets the help bar to message 3465; for the new row that
+// one lookup answers "Set the number of racers.".
+extern "C" void VsSettings_OnUpDownSelect_80853988(CpuContext* ctx) {
+    gSettingHelp = gRow != 0 && ctx->gpr[4] == gRow;
+    MKW_GUEST_NEXT(80853988)(ctx);
+    gSettingHelp = false;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80853988, VsSettings_OnUpDownSelect_80853988, "VsSettings_OnUpDownSelect_80853988");
+
 extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
+    if (gSettingHelp && ctx->gpr[4] == kHelpBmg) {
+        MKW_GUEST_NEXT(805F8C88)(ctx);
+        gHelpMsgIndex = ctx->gpr[3];
+        ctx->gpr[3] = kHelpMsg;
+        return;
+    }
     if (gLoadingRow && ctx->gpr[4] == kLabelBmg) {
         MKW_GUEST_NEXT(805F8C88)(ctx);
         gLabelMsg = ctx->gpr[3];
@@ -223,8 +252,8 @@ extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
 REGISTER_NATIVE_WRAPPER_AS(0x805F8C88, BmgHolder_GetMsgId_805f8c88, "BmgHolder_GetMsgId_805f8c88");
 
 extern "C" void BmgHolder_GetMsgByMsgId_805f8cf0(CpuContext* ctx) {
-    if (ctx->gpr[4] == kInjectedMsg) {
-        ctx->gpr[3] = kLabelText;
+    if (ctx->gpr[4] == kInjectedMsg || ctx->gpr[4] == kHelpMsg) {
+        ctx->gpr[3] = ctx->gpr[4] == kHelpMsg ? kHelpText : kLabelText;
         return;
     }
     MKW_GUEST_NEXT(805F8CF0)(ctx);
@@ -233,6 +262,7 @@ REGISTER_NATIVE_WRAPPER_AS(0x805F8CF0, BmgHolder_GetMsgByMsgId_805f8cf0, "BmgHol
 
 extern "C" void BmgHolder_GetFontIndex_805f8d2c(CpuContext* ctx) {
     if (ctx->gpr[4] == kInjectedMsg) ctx->gpr[4] = gLabelMsg;
+    else if (ctx->gpr[4] == kHelpMsg) ctx->gpr[4] = gHelpMsgIndex;
     MKW_GUEST_NEXT(805F8D2C)(ctx);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x805F8D2C, BmgHolder_GetFontIndex_805f8d2c, "BmgHolder_GetFontIndex_805f8d2c");

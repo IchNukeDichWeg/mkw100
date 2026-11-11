@@ -4,6 +4,7 @@
 #include "boot_race.h"
 #include "guest_function_imports.h"
 #include "guest_abi/player_slots.h"
+#include "hle/custom_messages.h"
 #include "memory.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -18,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace local_vs_detail {
 std::atomic<int> desiredCount{100};
@@ -27,6 +29,9 @@ std::atomic<bool> thirtyFps{false};
 std::atomic<bool> instantBoxes{true};
 std::atomic<uint32_t> scoring{uint32_t(LocalVs::Scoring::ClassicSpread)};
 std::atomic<uint32_t> itemDistribution{uint32_t(LocalVs::ItemDistribution::Even)};
+std::atomic<uint32_t> itemCycler{uint32_t(LocalVs::ItemCycler::Off)};
+constexpr std::array<const char*,3> cyclerKeys{{"off","debug","infinite"}};
+constexpr std::array<const char*,3> cyclerNames{{"Off","Debug (items used up)","Infinite"}};
 // Config.toml values for the two balancing options, in enum order.
 constexpr std::array<const char*,3> scoringKeys{{"classic_spread","classic_top12","linear"}};
 constexpr std::array<const char*,3> scoringNames{{"Classic, spread over the field","Classic, top 12 only","Linear (N..1, +3/+1 for 1st/2nd)"}};
@@ -73,7 +78,9 @@ void Initialize() {
     local_vs_detail::instantBoxes = c.localVsInstantBoxes.value_or(true);
     local_vs_detail::scoring = local_vs_detail::ParseKey(c.localVsScoring, local_vs_detail::scoringKeys);
     local_vs_detail::itemDistribution = local_vs_detail::ParseKey(c.localVsItemDistribution, local_vs_detail::itemKeys);
+    local_vs_detail::itemCycler = local_vs_detail::ParseKey(c.localVsItemCycler, local_vs_detail::cyclerKeys);
 }
+ItemCycler CurrentItemCycler() { return ItemCycler(local_vs_detail::itemCycler.load()); }
 ItemDistribution CurrentItemDistribution() { return ItemDistribution(local_vs_detail::itemDistribution.load()); }
 uint32_t PointsFor(uint32_t place, uint32_t count) {
     using namespace local_vs_detail;
@@ -114,7 +121,7 @@ void SetDesiredCount(int count) {
     local_vs_detail::desiredCount = count;
     RuntimeConfigFile::WriteSetting("local_vs", "players", std::to_string(count));
 }
-bool UnlocksEnabled() { return !BootRace::CpuDriven() && local_vs_detail::unlocks.load(); }
+bool UnlocksEnabled() { return !BootRace::Scripted() && local_vs_detail::unlocks.load(); }
 void DrawSettings() {
     using namespace local_vs_detail;
     int count = desiredCount.load();
@@ -172,6 +179,14 @@ void DrawSettings() {
         ImGui::TextUnformatted(help[std::min<uint32_t>(uint32_t(items), 3)]);
         ImGui::TextUnformatted("Item distribution applies from the next race.");
     }
+    ImGui::Separator();
+    int cycler = int(itemCycler.load());
+    ImGui::SetNextItemWidth(280);
+    if (ImGui::Combo("Debug item cycler", &cycler, cyclerNames.data(), int(cyclerNames.size()))) {
+        itemCycler = uint32_t(cycler);
+        RuntimeConfigFile::WriteSetting("local_vs", "item_cycler", RuntimeConfigFile::FormatString(cyclerKeys[cycler]));
+    }
+    ImGui::TextUnformatted("Offline only. Y + D-pad left/right picks an item (D-pad alone on a Nunchuk). By _Ro.");
     std::vector<Entry> copy;
     { std::lock_guard lock(standingsMutex); copy = standings; }
     if (!copy.empty() && ImGui::BeginTable("Full race results", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(520,320))) {
@@ -273,7 +288,7 @@ void TestItems(CpuContext* ctx, uint32_t info) {
     }
     static const bool enabled=std::getenv("MKW100_TEST_ITEMS")!=nullptr;
     static bool fired=false;
-    if (!enabled || !BootRace::CpuDriven() || fired || !local_vs_detail::ExpandedOffline() ||
+    if (!enabled || !BootRace::Scripted() || fired || !local_vs_detail::ExpandedOffline() ||
         Memory::Read32(info+0x28)!=2 || Memory::Read32(info+0x20)<600) return;
     fired=true;
     const CpuContext saved=*ctx;
@@ -363,32 +378,202 @@ extern "C" void LocalVs_UpdatePoints_8052e950(CpuContext* ctx) {
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8052E950, LocalVs_UpdatePoints_8052e950, "LocalVs_UpdatePoints_8052e950");
 
-// Only twelve native layouts exist. Full results remain available in F10 > Local VS.
+// Only twelve native rows exist; the pages below scroll a 12-row window over the whole field.
 extern "C" void LocalVs_RowCount_8085c4f4(CpuContext* ctx) {
     MKW_GUEST_NEXT(8085C4F4)(ctx);
     ctx->gpr[3]=std::min(ctx->gpr[3],12u);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8085C4F4, LocalVs_RowCount_8085c4f4, "LocalVs_RowCount_8085c4f4");
 
-// The original total page writes count entries even when GetRowCount is smaller.
-extern "C" void LocalVs_TotalRows_8085cae8(CpuContext* ctx) {
-    using namespace local_vs_detail;
-    if (!ExpandedOffline()) { MKW_GUEST_NEXT(8085CAE8)(ctx); return; }
-    const uint32_t page=ctx->gpr[3];
-    std::vector<Entry> rows;
-    { std::lock_guard lock(standingsMutex); rows=standings; }
-    std::stable_sort(rows.begin(),rows.end(),[](const Entry&a,const Entry&b){return a.total>b.total;});
-    const CpuContext saved=*ctx;
-    for (uint32_t i=0;i<std::min<uint32_t>(12,rows.size());++i) {
-        const uint32_t control=Memory::Read32(Memory::Read32(page+0x1A0)+4*i);
-        const uint32_t entry=Memory::Read32(page+0x1A4)+12*i;
-        Memory::Write32(entry,rows[i].total); Memory::Write32(entry+4,rows[i].earned); Memory::Write8(entry+8,rows[i].id);
-        *ctx=saved; ctx->gpr[3]=control; ctx->gpr[4]=i+1; ctx->gpr[5]=rows[i].id; MKW_GUEST_FUNC(807F5FEC)(ctx);
-        *ctx=saved; ctx->gpr[3]=control; ctx->gpr[4]=rows[i].total; ctx->gpr[5]=1313; MKW_GUEST_FUNC(807F56D4)(ctx);
+// Scrolling results. Both leaderboard pages (after each race: GPVSLeaderboardUpdate, by place;
+// series standings: GPVSLeaderboardTotal, by total) keep the game's 12 CtrlRaceResult rows and
+// show a 12-row window of the whole field. Up/down moves the window a row (holding the stick
+// repeats), left/right a page; the view opens around the local player. Rows come from this
+// race's scoring (standings: place, points earned, total), not Raceinfo's place table. A scroll
+// refills place, final total and name or time only: re-arming a row's score animation or the
+// page's frame counter (+0x44) meets the page's end condition and leaves the page. Places past 12
+// have no message (BMG 1300 + place covers 1st..12th), so their place text box gets a runtime
+// message, "13th", "21st", ... in 12th's font (custom_messages.cpp); text set directly is lost,
+// the row's message holder re-applies its message when drawn. The "+N" box (get_point) is set
+// with message 1315 and the racer's points on every fill: FillScoreDiff only runs on the first
+// fill, because re-arming its animation ends the page.
+namespace results_scroll {
+constexpr uint32_t kRows = 12;
+constexpr uint32_t kPositionPane = 0x808AA470;  // "position", CtrlRaceResult's place text box
+constexpr uint32_t kGetPointPane = 0x808AF204;  // "get_point", hidden on the standings page
+constexpr uint32_t kNumberMessage = 1313;       // FillScore's style message ("pts")
+constexpr uint32_t kIntegerMessage = 1314;      // Race.bmg: just integer 0 (the score's number)
+constexpr uint32_t kPointsPane = 0x808AA416;     // "get_point", the "+N" text box
+constexpr uint32_t kSignedMessage = 1315;       // Race.bmg: signed integer 0 ("+N")
+uint32_t page = 0;       // the leaderboard page being scrolled, 0 when none
+bool standingsPage = false;
+uint32_t offset = 0;
+uint32_t count = 0;
+uint32_t repeat = 0;
+
+uint32_t Control(uint32_t pg, uint32_t row) { return Memory::Read32(Memory::Read32(pg + 0x1A0) + 4 * row); }
+
+void Call(CpuContext* ctx, const CpuContext& saved, uint32_t fn, uint32_t r3, uint32_t r4 = 0, uint32_t r5 = 0,
+          uint32_t r6 = 0) {
+    *ctx = saved;
+    ctx->gpr[3] = r3; ctx->gpr[4] = r4; ctx->gpr[5] = r5; ctx->gpr[6] = r6;
+    InvokeIndirectCpu(fn, ctx);
+}
+
+// LayoutUIControl::SetTextBoxMessage(control, pane, bmg, info) with intToPass[0] = value; the
+// Text::Info sits below the caller's stack (the message holder copies it, as FillScore's does).
+void SetPaneMessage(CpuContext* ctx, const CpuContext& saved, uint32_t control, uint32_t pane, uint32_t bmg,
+                    uint32_t value) {
+    const uint32_t info = (saved.gpr[1] - 0x200) & ~0xFu;
+    for (uint32_t i = 0; i < 0xC4; i += 4) Memory::Write32(info + i, 0);
+    Memory::Write32(info, value);
+    *ctx = saved;
+    ctx->gpr[1] = info - 0x80;
+    ctx->gpr[3] = control; ctx->gpr[4] = pane; ctx->gpr[5] = bmg; ctx->gpr[6] = info;
+    InvokeIndirectCpu(0x8063DCBC, ctx);
+}
+
+// CtrlRaceResult::Fill(control, place, player) with the place text set for any place.
+void FillPlace(CpuContext* ctx, const CpuContext& saved, uint32_t control, uint32_t place, uint32_t player) {
+    Call(ctx, saved, 0x807F5FEC, control, std::min(place, kRows), player);
+    if (place <= kRows) return;
+    const uint32_t ordinal = CustomMessages::PlaceBmg(place);
+    SetPaneMessage(ctx, saved, control, kPositionPane, ordinal ? ordinal : kIntegerMessage, place);
+}
+
+std::vector<local_vs_detail::Entry> StandingsByPlace() {
+    std::vector<local_vs_detail::Entry> rows;
+    { std::lock_guard lock(local_vs_detail::standingsMutex); rows = local_vs_detail::standings; }
+    std::stable_sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.place < b.place; });
+    return rows;
+}
+
+// A row of the after-race page: place, score before the race and what it earned, name or time.
+void FillRaceRow(CpuContext* ctx, const CpuContext& saved, uint32_t pg, uint32_t row, bool animate,
+                 const std::vector<local_vs_detail::Entry>& byPlace) {
+    if (offset + row >= byPlace.size()) return;
+    const auto& e = byPlace[offset + row];
+    const uint32_t rd = Memory::Read32(MKW_GADDR(809BD728));
+    const uint32_t place = e.place;
+    const uint32_t player = e.id;
+    const uint32_t control = Control(pg, row);
+    const uint32_t after = e.total;
+    const uint32_t before = e.total - e.earned;
+    FillPlace(ctx, saved, control, place, player);
+    Call(ctx, saved, 0x807F56D4, control, animate ? before : after, kNumberMessage);  // FillScore
+    if (animate) Call(ctx, saved, 0x807F579C, control, after - before, row == 0 ? 1 : 0);  // FillScoreDiff
+    SetPaneMessage(ctx, saved, control, kPointsPane, kSignedMessage, e.earned);  // "+N" of this racer
+    Call(ctx, saved, Memory::Read32(rd + 0xB70) == 0 ? 0x807F595C : 0x807F52F4, control, player);  // time or name
+}
+
+void FillStandingsRows(CpuContext* ctx, const CpuContext& saved, uint32_t pg,
+                       const std::vector<local_vs_detail::Entry>& rows) {
+    for (uint32_t row = 0; row < kRows && offset + row < rows.size(); ++row) {
+        const auto& e = rows[offset + row];
+        const uint32_t control = Control(pg, row);
+        const uint32_t entry = Memory::Read32(pg + 0x1A4) + 12 * row;
+        Memory::Write32(entry, e.total); Memory::Write32(entry + 4, e.earned); Memory::Write8(entry + 8, e.id);
+        FillPlace(ctx, saved, control, offset + row + 1, e.id);
+        Call(ctx, saved, 0x807F56D4, control, e.total, kNumberMessage);
+        Call(ctx, saved, 0x8063DEEC, control, kGetPointPane);  // as the game's standings page does
+        Call(ctx, saved, 0x807F52F4, control, e.id);           // FillName
     }
-    *ctx=saved;
+}
+
+std::vector<local_vs_detail::Entry> StandingsByTotal() {
+    std::vector<local_vs_detail::Entry> rows;
+    { std::lock_guard lock(local_vs_detail::standingsMutex); rows = local_vs_detail::standings; }
+    std::stable_sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.total > b.total; });
+    return rows;
+}
+
+// The window that shows place `place` (1-based) about mid-screen.
+uint32_t OffsetAround(uint32_t place, uint32_t total) {
+    if (total <= kRows || place == 0) return 0;
+    const uint32_t wanted = place > kRows / 2 ? place - kRows / 2 : 0;
+    return std::min(wanted, total - kRows);
+}
+} // namespace results_scroll
+
+// GPVSLeaderboardUpdate::FillRows: score the race once, then fill a window around the player.
+extern "C" void LocalVs_UpdatePoints_8052e950(CpuContext* ctx);
+extern "C" void LocalVs_UpdateRows_8085c858(CpuContext* ctx) {
+    using namespace results_scroll;
+    if (!local_vs_detail::ExpandedOffline()) { MKW_GUEST_NEXT(8085C858)(ctx); return; }
+    const uint32_t pg = ctx->gpr[3];
+    const CpuContext saved = *ctx;
+    ctx->gpr[3] = Memory::Read32(MKW_GADDR(809BD728)) + 0xC10;  // menu scenario
+    LocalVs_UpdatePoints_8052e950(ctx);
+    const auto byPlace = StandingsByPlace();
+    uint32_t mine = 0;
+    for (const auto& e : byPlace) if (e.id == 0) mine = e.place;
+    page = pg; standingsPage = false; count = uint32_t(byPlace.size()); repeat = 0;
+    offset = OffsetAround(mine, count);
+    for (uint32_t row = 0; row < kRows && row < count; ++row) FillRaceRow(ctx, saved, pg, row, true, byPlace);
+    *ctx = saved;
+    InvokeIndirectCpu(Memory::Read32(Memory::Read32(pg) + 0x6C), ctx);  // vf 0x6c, as the game's FillRows ends
+    *ctx = saved;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8085C858, LocalVs_UpdateRows_8085c858, "LocalVs_UpdateRows_8085c858");
+
+// GPVSLeaderboardTotal::FillRows: the series standings, by total, around the player.
+extern "C" void LocalVs_TotalRows_8085cae8(CpuContext* ctx) {
+    using namespace results_scroll;
+    if (!local_vs_detail::ExpandedOffline()) { MKW_GUEST_NEXT(8085CAE8)(ctx); return; }
+    const uint32_t pg = ctx->gpr[3];
+    const auto rows = StandingsByTotal();
+    uint32_t mine = 0;
+    for (uint32_t i = 0; i < rows.size(); ++i) if (rows[i].id == 0) mine = i + 1;
+    page = pg; standingsPage = true; count = uint32_t(rows.size()); repeat = 0;
+    {
+        const uint32_t rd = Memory::Read32(MKW_GADDR(809BD728));
+        for (uint32_t i = 0; i < rows.size(); ++i) Memory::Write8(rd + MKW100_PlayerSlotOffset(rows[i].id) + 0xCF8, uint8_t(i + 1));
+    }
+    offset = OffsetAround(mine, count);
+    const CpuContext saved = *ctx;
+    FillStandingsRows(ctx, saved, pg, rows);
+    *ctx = saved;
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8085CAE8, LocalVs_TotalRows_8085cae8, "LocalVs_TotalRows_8085cae8");
+
+// Leaderboard::AfterControlUpdate: scroll the page set up above with the local player's input.
+extern "C" void LocalVs_LeaderboardScroll_8085c0c4(CpuContext* ctx) {
+    using namespace results_scroll;
+    const uint32_t pg = ctx->gpr[3];
+    MKW_GUEST_NEXT(8085C0C4)(ctx);
+    if (pg != page || !local_vs_detail::ExpandedOffline()) return;
+    if (count <= kRows) return;
+    const CpuContext saved = *ctx;
+    Call(ctx, saved, 0x805EEE0C, 0);  // ManipulatorManager::GetControllerHolder(0)
+    const uint32_t holder = ctx->gpr[3];
+    *ctx = saved;
+    if (holder < 0x80000000u) return;
+    const uint32_t now = Memory::Read16(holder + 0x5C), before = Memory::Read16(holder + 0x90);  // UIState actions
+    const float stickY = Memory::ReadFloat32(holder + 0x64);
+    const auto pressed = [&](uint32_t bit) { return (now & bit) != 0 && (before & bit) == 0; };
+    int step = 0;
+    if (pressed(0x8)) step = -1;
+    else if (pressed(0x10)) step = 1;
+    else if (pressed(0x20)) step = -int(kRows);
+    else if (pressed(0x40)) step = int(kRows);
+    else if (stickY > 0.6f || stickY < -0.6f) {
+        if (++repeat >= 12 && repeat % 4 == 0) step = stickY > 0 ? -1 : 1;  // hold to repeat after ~0.2 s
+    } else {
+        repeat = 0;
+    }
+    if (step == 0) return;
+    const int last = int(count - kRows);
+    const uint32_t moved = uint32_t(std::clamp(int(offset) + step, 0, last));
+    if (moved == offset) return;
+    offset = moved;
+    if (standingsPage) FillStandingsRows(ctx, saved, pg, StandingsByTotal());
+    else {
+        const auto byPlace = StandingsByPlace();
+        for (uint32_t row = 0; row < kRows; ++row) FillRaceRow(ctx, saved, pg, row, false, byPlace);
+    }
+    *ctx = saved;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8085C0C4, LocalVs_LeaderboardScroll_8085c0c4, "LocalVs_LeaderboardScroll_8085c0c4");
 
 extern "C" void LocalVs_CharacterUnlocked_8054fed8(CpuContext* ctx) {
     if (LocalVs::UnlocksEnabled()) ctx->gpr[3]=1; else MKW_GUEST_NEXT(8054FED8)(ctx);
@@ -455,8 +640,8 @@ REGISTER_NATIVE_WRAPPER_AS(0x80580438, LocalVs_Lightning_80580438, "LocalVs_Ligh
 // RKSystem's existing half-rate path alternates a simulation-only iteration
 // with a rendered iteration. Menus and the deterministic CPU oracle stay default.
 extern "C" void LocalVs_Framerate_8051af84(CpuContext* ctx) {
-    const bool test30=BootRace::CpuDriven() && std::getenv("MKW100_TEST_30FPS")!=nullptr;
-    if (local_vs_detail::ExpandedOffline() && (test30 || (!BootRace::CpuDriven() && local_vs_detail::thirtyFps.load()))) {
+    const bool test30=BootRace::Scripted() && std::getenv("MKW100_TEST_30FPS")!=nullptr;
+    if (local_vs_detail::ExpandedOffline() && (test30 || (!BootRace::Scripted() && local_vs_detail::thirtyFps.load()))) {
         ctx->gpr[4]=1;
         RT_LOGF("local-vs", "alternate-frame rendering enabled\n");
     }

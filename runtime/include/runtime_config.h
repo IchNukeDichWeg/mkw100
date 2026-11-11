@@ -39,6 +39,7 @@ struct RuntimeUserConfig {
     std::optional<bool> localVsInstantBoxes;
     std::optional<std::string> localVsScoring;           // "classic_spread", "classic_top12", "linear"
     std::optional<std::string> localVsItemDistribution;  // "even", "generous", "tight", "classic_top11"
+    std::optional<std::string> localVsItemCycler;        // "off", "debug", "infinite"
     std::optional<bool> widescreen;
     std::optional<bool> forceAspect169;
     std::optional<int32_t> windowPosX;
@@ -416,6 +417,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.localVsInstantBoxes = FindConfigValue<bool>(document, "local_vs", "instant_boxes");
     config.localVsScoring = FindConfigValue<std::string>(document, "local_vs", "scoring");
     config.localVsItemDistribution = FindConfigValue<std::string>(document, "local_vs", "item_distribution");
+    config.localVsItemCycler = FindConfigValue<std::string>(document, "local_vs", "item_cycler");
     config.widescreen = FindConfigValue<bool>(document, "video", "widescreen");
     config.forceAspect169 = FindConfigValue<bool>(document, "video", "force_16_9");
     config.windowPosX = FindConfigInt(document, "video", "window_x");

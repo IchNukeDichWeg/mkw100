@@ -15,6 +15,9 @@ void SetDesiredCount(int count);
 enum class Scoring : uint32_t { ClassicSpread, ClassicTop12, Linear };
 enum class ItemDistribution : uint32_t { Even, Generous, Tight, ClassicTop11 };
 ItemDistribution CurrentItemDistribution();
+// Debug item cycler (runtime/src/hle/item_cycler.cpp), any offline race.
+enum class ItemCycler : uint32_t { Off, Debug, Infinite };
+ItemCycler CurrentItemCycler();
 // Points for finishing `place` (1-based) of `count` racers under the current scoring.
 uint32_t PointsFor(uint32_t place, uint32_t count);
 // The 0-based ItemSlot.bin row (of `rows`) that race position `position` (0-based) of `count` draws from.

@@ -200,6 +200,10 @@ Not code, but the documentation this project depends on:
 - [Retro Rewind](https://wiki.tockdom.com/wiki/Retro_Rewind) by ZPL - the mod distribution this
   project can build as a static profile. No Retro Rewind content is redistributed here; users
   supply their own copy.
+- "Item Cycler (Debug and Infinite)" by _Ro
+  ([thread](https://mariokartwii.com/showthread.php?tid=2674),
+  [source](https://github.com/RoGamer97/My-Cheat-Code-Collection_ASM-Hacks)) - a Gecko code;
+  `runtime/src/hle/item_cycler.cpp` reimplements its behaviour natively (no code copied).
 
 ---
 

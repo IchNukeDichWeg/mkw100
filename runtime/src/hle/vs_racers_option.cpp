@@ -18,6 +18,7 @@
 #include "guest_abi/player_slots.h"
 #include "guest_function_imports.h"
 #include "local_vs.h"
+#include "hle/custom_messages.h"
 #include "memory.h"
 #include "runtime_log.h"
 
@@ -235,6 +236,12 @@ extern "C" void VsSettings_OnUpDownSelect_80853988(CpuContext* ctx) {
 REGISTER_NATIVE_WRAPPER_AS(0x80853988, VsSettings_OnUpDownSelect_80853988, "VsSettings_OnUpDownSelect_80853988");
 
 extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
+    if (uint32_t custom = ctx->gpr[4], fontBmg = 0; CustomMessages::IsCustom(custom, fontBmg)) {  // custom_messages.h
+        ctx->gpr[4] = fontBmg;
+        MKW_GUEST_NEXT(805F8C88)(ctx);
+        ctx->gpr[3] = CustomMessages::Index(custom, ctx->gpr[3]);
+        return;
+    }
     if (gSettingHelp && ctx->gpr[4] == kHelpBmg) {
         MKW_GUEST_NEXT(805F8C88)(ctx);
         gHelpMsgIndex = ctx->gpr[3];
@@ -252,6 +259,7 @@ extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
 REGISTER_NATIVE_WRAPPER_AS(0x805F8C88, BmgHolder_GetMsgId_805f8c88, "BmgHolder_GetMsgId_805f8c88");
 
 extern "C" void BmgHolder_GetMsgByMsgId_805f8cf0(CpuContext* ctx) {
+    if (uint32_t text = 0; CustomMessages::Text(ctx->gpr[4], text)) { ctx->gpr[3] = text; return; }
     if (ctx->gpr[4] == kInjectedMsg || ctx->gpr[4] == kHelpMsg) {
         ctx->gpr[3] = ctx->gpr[4] == kHelpMsg ? kHelpText : kLabelText;
         return;
@@ -261,6 +269,7 @@ extern "C" void BmgHolder_GetMsgByMsgId_805f8cf0(CpuContext* ctx) {
 REGISTER_NATIVE_WRAPPER_AS(0x805F8CF0, BmgHolder_GetMsgByMsgId_805f8cf0, "BmgHolder_GetMsgByMsgId_805f8cf0");
 
 extern "C" void BmgHolder_GetFontIndex_805f8d2c(CpuContext* ctx) {
+    if (uint32_t real = 0; CustomMessages::FontIndex(ctx->gpr[4], real)) ctx->gpr[4] = real;
     if (ctx->gpr[4] == kInjectedMsg) ctx->gpr[4] = gLabelMsg;
     else if (ctx->gpr[4] == kHelpMsg) ctx->gpr[4] = gHelpMsgIndex;
     MKW_GUEST_NEXT(805F8D2C)(ctx);

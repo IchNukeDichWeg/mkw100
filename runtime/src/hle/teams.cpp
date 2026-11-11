@@ -88,12 +88,10 @@ void NewSeries(uint32_t racers, bool repeatable) {
 
 bool Active() {
     std::lock_guard guard(g_lock);
-    // Expanded races only (13+ racers): up to 12 the game's own scoring and HUD run unchanged.
-    // Not in the game's own Team VS (race scenario mode flags, Racedata + 0x20 + 0xB48 + 0x28, bit 2):
-    // that one is red/blue with its own results.
-    const uint32_t rd = Memory::Read32(0x809BD728);
-    if (!rd || (Memory::Read32(rd + 0xB90) & 2) != 0) return false;
-    return Count() >= 2 && g_teamOf.size() > Count() && local_vs_detail::RaceCount() > 12;
+    // Teams belong to Team VS only (race scenario mode flags, Racedata + 0x20 + 0xB48 + 0x28, bit 2):
+    // averaged teams in solo VS read as a bug. Team VS still runs the game's red/blue
+    // (team_results.cpp) until its own 2-8 team leaderboard lands, so nothing turns this on yet.
+    return false;
 }
 
 uint32_t TeamOf(uint32_t player) {

@@ -80,3 +80,44 @@ extern "C" void TeamResults_ColumnInit_807f69e4(CpuContext* ctx) {
     if (team < 2) Memory::Write32(column + kColumnScore, totals[team]);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x807F69E4, TeamResults_ColumnInit_807f69e4, "TeamResults_ColumnInit_807f69e4");
+
+// CtrlRaceResultTeam::OnUpdate(this). The team score counts up as a float (+0xB70) toward the
+// total (+0xB74), and each row's points (+0x178 float toward +0x174, row stride 0x14, +0x180 = -1
+// for an empty row) the same way, by a fixed step a frame: fine for six racers of at most 15
+// points, minutes for a 64-racer team. Past 12 racers every count is stepped ahead first so it
+// lands in about a second; the game still takes the last step itself, so its text and finish
+// handling are unchanged.
+namespace {
+
+constexpr uint32_t kColumnShown = 0xB70;
+constexpr uint32_t kColumnCounting = 0xAA8;  // nonzero once the team score is counting
+constexpr uint32_t kRowTarget = 0x174;
+constexpr uint32_t kRowShown = 0x178;
+constexpr uint32_t kRowPlayer = 0x180;
+constexpr uint32_t kRowStride = 0x14;
+constexpr float kCountFrames = 60.0f;
+
+void TeamResultsHurry(uint32_t shownAddr, uint32_t target) {
+    const float shown = Memory::ReadFloat32(shownAddr);
+    const float left = float(target) - shown;
+    if (!(left > 1.0f)) return;
+    const float step = std::max(1.0f, float(target) / kCountFrames);
+    Memory::WriteFloat32(shownAddr, shown + std::min(step, left - 1.0f));
+}
+
+} // namespace
+
+extern "C" void TeamResults_ColumnUpdate_807f6fb8(CpuContext* ctx) {
+    const uint32_t column = ctx->gpr[3];
+    const uint32_t rd = Memory::Read32(kTeamRacedata);
+    const uint32_t count = rd ? Memory::Read8(rd + kTeamRaceCount) : 0;
+    if (count > 12) {
+        if (Memory::Read32(column + kColumnCounting) != 0) TeamResultsHurry(column + kColumnShown, Memory::Read32(column + kColumnScore));
+        for (uint32_t k = 0; k < kColumnRows; ++k) {
+            const uint32_t row = column + k * kRowStride;
+            if (Memory::Read32(row + kRowPlayer) != 0xFFFFFFFFu) TeamResultsHurry(row + kRowShown, Memory::Read32(row + kRowTarget));
+        }
+    }
+    MKW_GUEST_NEXT(807F6FB8)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x807F6FB8, TeamResults_ColumnUpdate_807f6fb8, "TeamResults_ColumnUpdate_807f6fb8");

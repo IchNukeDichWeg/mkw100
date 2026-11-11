@@ -196,8 +196,8 @@ void DrawSettings() {
         static constexpr std::array<const char*, 8> teamNames{{"Off","2 teams","3 teams","4 teams","5 teams","6 teams","7 teams","8 teams"}};
         int teams = Teams::Count() < 2 ? 0 : int(Teams::Count()) - 1;
         ImGui::SetNextItemWidth(280);
-        if (ImGui::Combo("Teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(teams == 0 ? 0 : uint32_t(teams) + 1);
-        ImGui::TextUnformatted("Racers are split evenly at the start of a series; a team scores its members' average.");
+        if (ImGui::Combo("Team VS teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(teams == 0 ? 0 : uint32_t(teams) + 1);
+        ImGui::TextUnformatted("Team VS only, not solo VS. Team VS still plays the game's red vs blue; 3-8 teams are coming.");
         const auto teamRows = Teams::LastStandings();
         if (!teamRows.empty() && ImGui::BeginTable("Team standings", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Team"); ImGui::TableSetupColumn("Members");
@@ -369,10 +369,6 @@ void PrepareRace(uint32_t rd) {
     if (first) {
         seriesCount=desiredCount.load();
         { std::lock_guard lock(standingsMutex); standings.clear(); }
-        if (!teamVs) {  // our 2..8 teams are for solo VS; Team VS uses the game's red/blue
-            Teams::NewSeries(seriesCount, false);
-            Teams::Log("series", {});
-        }
     }
     const uint32_t humanCharacter=Memory::Read32(Player(menu,0)+0xC);
     for (uint32_t i=0;i<PlayerSlots::kMaxPlayers;++i) {

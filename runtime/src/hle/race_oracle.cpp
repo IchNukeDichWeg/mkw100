@@ -126,7 +126,7 @@ void Finish(uint32_t raceinfo, uint32_t playerCount) {
             std::printf("[race-oracle] racer %2u place %2u time none\n", id, position);
         }
     }
-    if (Teams::Count() >= 2) {
+    if (Teams::Active()) {
         std::vector<std::pair<uint32_t, uint32_t>> points;
         for (uint32_t id = 0; id < playerCount; ++id) {
             const uint32_t position = Memory::Read8(Memory::Read32(players + id * 4) + kPlayerPosition);

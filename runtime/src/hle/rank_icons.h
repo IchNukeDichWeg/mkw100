@@ -10,9 +10,9 @@ namespace RankIcons {
 // rank_icons/rankNNN.tpl for `place` is present and loaded (13..128).
 bool Available(uint32_t place);
 
-// The race HUD position counter `control` (CtrlRaceRankNum) shows `place`: for 13+ its three
-// picture panes get the icon and its texture-pattern animation is paused; for 1..12 the stock
-// textures and animation are restored. False when 13+ has no icon. Restores `ctx`.
+// The race HUD position counter `control` (CtrlRaceRankNum) shows `place`: for 13+ its texture
+// pattern's 12th entry is the place's icon, for 1..12 the stock texture. False when 13+ has no
+// icon. Allocates in the race scene's heap through `ctx` and restores it.
 bool Show(CpuContext* ctx, uint32_t control, uint32_t place);
 
 } // namespace RankIcons

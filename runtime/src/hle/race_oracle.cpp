@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <thread>
 
 namespace {
@@ -138,6 +139,20 @@ void Finish(uint32_t raceinfo, uint32_t playerCount) {
                 static_cast<unsigned long long>(g_trajectory));
     std::fflush(stdout);
     std::fflush(stderr);
+    // MKW100_TEST_RESULTS=<seconds>: keep running past the finish so the results and standings
+    // pages are exercised too (the scripted driver taps A through them); a crash there fails the
+    // case. Then exit as usual.
+    if (const char* stay = std::getenv("MKW100_TEST_RESULTS"); stay && std::atoi(stay) > 0) {
+        const int seconds = std::atoi(stay);
+        std::printf("[race-oracle] staying %d s for the results pages\n", seconds);
+        std::fflush(stdout);
+        std::thread([seconds] {
+            std::this_thread::sleep_for(std::chrono::seconds(seconds));
+            std::printf("[race-oracle] results pages survived %d s\n", seconds);
+            RuntimeFlushAndExit(EXIT_SUCCESS);
+        }).detach();
+        return;
+    }
     // Skips teardown of the audio and GX worker threads, which the oracle does not need.
     RuntimeFlushAndExit(EXIT_SUCCESS);
 }
@@ -225,3 +240,26 @@ extern "C" void Raceinfo_Update_805331b4(CpuContext* ctx) {
     }
 }
 REGISTER_NATIVE_WRAPPER_AS(0x805331B4, Raceinfo_Update_805331b4, "Raceinfo_Update_805331b4");
+
+// MKW100_TEST_RESULTS: log every page activation and section change, to see which screens a
+// headless race reaches after its finish.
+namespace {
+bool ResultsTrace() {
+    static const bool on = std::getenv("MKW100_TEST_RESULTS") != nullptr;
+    return on;
+}
+} // namespace
+
+// Page::Activate(this)
+extern "C" void RaceOracle_PageActivate_80601aec(CpuContext* ctx) {
+    if (ResultsTrace()) std::printf("[race-oracle] page 0x%02X activated\n", Memory::Read32(ctx->gpr[3] + 4));
+    MKW_GUEST_NEXT(80601AEC)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80601AEC, RaceOracle_PageActivate_80601aec, "RaceOracle_PageActivate_80601aec");
+
+// SectionMgr::SetNextSection(this, id, animDirection)
+extern "C" void RaceOracle_SetNextSection_80635a3c(CpuContext* ctx) {
+    if (ResultsTrace()) std::printf("[race-oracle] next section 0x%02X\n", ctx->gpr[4]);
+    MKW_GUEST_NEXT(80635A3C)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80635A3C, RaceOracle_SetNextSection_80635a3c, "RaceOracle_SetNextSection_80635a3c");

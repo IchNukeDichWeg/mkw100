@@ -159,8 +159,13 @@ void AutoDriver::FillPad(PADStatus& status) {
         status.button = (g_frame / 15) % 2 == 0 ? PAD_BUTTON_A : 0;
         return;
     }
-    if (Memory::Read32(raceinfo + kRaceinfoStage) < 2) {
+    const uint32_t stage = Memory::Read32(raceinfo + kRaceinfoStage);
+    if (stage < 2) {
         return;  // countdown: holding A early would burn out
+    }
+    if (stage > 2) {  // finished: tap A through the results pages
+        status.button = (g_frame / 20) % 2 == 0 ? PAD_BUTTON_A : 0;
+        return;
     }
     const uint32_t players = Memory::Read32(raceinfo + 0xC);
     const uint32_t player0 = InGuestRam(players) ? Memory::Read32(players) : 0;

@@ -41,6 +41,7 @@ constexpr uint32_t kSettingsOffset = 0xB48;
 constexpr uint32_t kSectionPadOffset = 0x34;
 constexpr uint32_t kFirstGcnControllerId = 0x124;
 constexpr uint32_t kSectionP1Vs = 0x20;
+constexpr uint32_t kSectionP1TeamVs = 0x24;  // --race-teams: the Team VS flow and its team results
 
 enum : uint32_t { kPlayerRealLocal = 0, kPlayerCpu = 1, kPlayerNone = 5 };
 enum : uint32_t { kGameModeVs = 1, kCc150 = 2, kCpuHard = 2, kItemsBalanced = 0 };
@@ -291,7 +292,7 @@ extern "C" void ArgumentParser_Parse_805b9344(CpuContext* ctx) {
     RT_LOGF("boot-race", "booting into 1P VS on course 0x%02X with %u racers%s\n", *g_course, g_players,
             g_cpuDriven ? " (CPU driven)" : g_autoDriven ? " (scripted human)" : "");
     if (g_teams) RT_LOGF("boot-race", "team mode: racers alternate red / blue\n");
-    ctx->gpr[3] = kSectionP1Vs;
+    ctx->gpr[3] = g_teams ? kSectionP1TeamVs : kSectionP1Vs;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x805B9344, ArgumentParser_Parse_805b9344, "ArgumentParser_Parse_805b9344");
 

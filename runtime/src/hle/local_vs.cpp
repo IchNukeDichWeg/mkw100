@@ -357,8 +357,9 @@ void PrepareRace(uint32_t rd) {
     const bool preview=gameType==5;
     bool solo = firstType == 0 || (preview && firstType == 1);
     for (uint32_t i=1;i<12;++i) solo = solo && Memory::Read32(Player(menu,i)+0x10) != 0;
-    const bool eligible = solo && Memory::Read32(menu+0xB50)==1 && (gameType==0 || preview) &&
-                          (Memory::Read32(menu+0xB70)&2)==0; // ordinary offline VS, no teams
+    // Offline VS, solo or the game's own Team VS (red/blue; team_results.cpp handles its results).
+    const bool teamVs = (Memory::Read32(menu+0xB70)&2)!=0;
+    const bool eligible = solo && Memory::Read32(menu+0xB50)==1 && (gameType==0 || preview);
     if (!eligible) {
         for (uint32_t i=12;i<PlayerSlots::kMaxPlayers;++i) Memory::Write32(Player(menu,i)+0x10,5);
         seriesCount=0;
@@ -368,8 +369,10 @@ void PrepareRace(uint32_t rd) {
     if (first) {
         seriesCount=desiredCount.load();
         { std::lock_guard lock(standingsMutex); standings.clear(); }
-        Teams::NewSeries(seriesCount, false);
-        Teams::Log("series", {});
+        if (!teamVs) {  // our 2..8 teams are for solo VS; Team VS uses the game's red/blue
+            Teams::NewSeries(seriesCount, false);
+            Teams::Log("series", {});
+        }
     }
     const uint32_t humanCharacter=Memory::Read32(Player(menu,0)+0xC);
     for (uint32_t i=0;i<PlayerSlots::kMaxPlayers;++i) {
@@ -385,6 +388,16 @@ void PrepareRace(uint32_t rd) {
             Memory::Write8(p+0xE1, i<seriesCount ? seriesCount-i : 0);
             Memory::Write8(p+0xE2, i<seriesCount ? seriesCount-i : 0);
         }
+    }
+    if (teamVs) {
+        // The team page assigns the first 12; the rest join whichever team is smaller.
+        uint32_t size[2] = {0, 0};
+        for (uint32_t i=0;i<12 && i<seriesCount;++i) { const uint32_t t=Memory::Read32(Player(menu,i)+0xCC); if (t<2) ++size[t]; }
+        for (uint32_t i=12;i<seriesCount;++i) {
+            const uint32_t t = size[0] <= size[1] ? 0 : 1;
+            Memory::Write32(Player(menu,i)+0xCC,t); ++size[t];
+        }
+        RT_LOGF("local-vs", "team vs: red %u blue %u\n", size[0], size[1]);
     }
     RT_LOGF("local-vs", "menu race: course=0x%02X racers=%u raceNumber=%u humanCharacter=%u\n",
             Memory::Read32(menu+0xB48),seriesCount,Memory::Read8(menu+0xB6C),humanCharacter);

@@ -106,6 +106,7 @@ bool g_raceSectionPicked = false;
 uint32_t g_players = kPlayerCount;
 bool g_cpuDriven = false;
 bool g_teams = false;  // --race-teams: the game's own red/blue team mode
+bool g_mirror = false; // --race-mirror: the Mirror flag, a 200cc race with cc200.cpp's toggle on
 bool g_autoDriven = false;
 bool g_lockstep = false;
 bool g_heapCheck = false;
@@ -161,7 +162,7 @@ void SetUpMenuScenario(uint32_t course) {
     Memory::Write32(settings + 0x18, kItemsBalanced);
     Memory::Write8(settings + 0x24, 0);
     Memory::Write8(settings + 0x25, 3);
-    Memory::Write32(settings + kSettingsModeFlags, g_teams ? 2 : 0);
+    Memory::Write32(settings + kSettingsModeFlags, (g_teams ? 2 : 0) | (g_mirror ? 1 : 0));
 }
 
 } // namespace
@@ -183,6 +184,10 @@ bool ParseArgument(std::string_view arg) {
     }
     if (arg == "--lockstep") {
         g_lockstep = true;
+        return true;
+    }
+    if (arg == "--race-mirror") {
+        g_mirror = true;
         return true;
     }
     if (arg == "--race-teams") {

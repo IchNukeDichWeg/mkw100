@@ -1295,6 +1295,11 @@ extern "C" void GxNotifyDisplayListMemoryWrite(uint32_t addr, uint32_t size) {
 
 extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes) {
     if (nbytes == 0 || listAddr == 0) return;
+    // Only a descriptor load in the list changes the descriptor; unreadable lists count as one.
+    if (const auto* bytes = static_cast<const uint8_t*>(GuestToHostPtr(listAddr, nbytes));
+        bytes == nullptr || GxWorker::ScanForVcdLoad(bytes, nbytes)) {
+        GxWorker::MarkVtxDescUnknown();
+    }
     // List bytes and the arrays it indexes are GPU-side reads, so they are read when the worker runs.
     if (GxWorker::ShouldDefer()) {
         EnsureAuroraFrameActive();

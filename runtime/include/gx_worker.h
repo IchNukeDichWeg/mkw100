@@ -31,6 +31,36 @@ void Stop();
 // Stops without running queued work; bounded, for fatal exits.
 void Abandon();
 
+// Set on the game thread whenever recorded or inline work may change the CP vertex descriptor
+// behind the game thread's copy of it (FIFO writes, display lists); see gx_vertex.cpp.
+inline constinit bool g_vtxDescUnknown = true;
+inline void MarkVtxDescUnknown() noexcept {
+    if (!detail::t_onWorker) g_vtxDescUnknown = true;
+}
+// Only a CP register load of the descriptor (command 0x08, register 0x50-0x5F VCD_LO, 0x60-0x6F
+// VCD_HI) or of the attribute formats (0x70-0x9F VAT A/B/C) changes them, so the written byte stream is scanned for that pair instead of marking on
+// every write: vertex data no longer forces GetVtxDesc to sync. A false match only costs a sync.
+inline constinit uint8_t g_cpPrevByte = 0;
+inline bool IsVcdLoad(uint8_t prev, uint8_t b) noexcept { return prev == 0x08 && b >= 0x50 && b < 0xA0; }
+inline bool ScanForVcdLoad(const uint8_t* data, size_t size) noexcept {
+    uint8_t prev = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (IsVcdLoad(prev, data[i])) return true;
+        prev = data[i];
+    }
+    return false;
+}
+inline void NoteFifoBytes(const uint8_t* data, size_t size) noexcept {
+    if (detail::t_onWorker || size == 0) return;
+    if (IsVcdLoad(g_cpPrevByte, data[0]) || ScanForVcdLoad(data, size)) g_vtxDescUnknown = true;
+    g_cpPrevByte = data[size - 1];
+}
+inline void NoteFifoWrite(uint32_t value, uint32_t sizeBytes) noexcept {
+    uint8_t bytes[4];
+    const uint32_t n = sizeBytes < 4 ? sizeBytes : 4;
+    for (uint32_t i = 0; i < n; ++i) bytes[i] = uint8_t(value >> (8 * (n - 1 - i)));
+    NoteFifoBytes(bytes, n);
+}
 inline bool Active() noexcept { return detail::g_active.load(std::memory_order_relaxed); }
 inline bool OnWorker() noexcept { return detail::t_onWorker; }
 // True when a GX entry point on this thread must be recorded instead of executed.

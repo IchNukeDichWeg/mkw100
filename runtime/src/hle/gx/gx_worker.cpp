@@ -54,7 +54,10 @@ uint64_t g_write = 0;
 std::atomic<uint64_t> g_head{0};
 std::atomic<uint64_t> g_tail{0};
 std::atomic<bool> g_consumerWaiting{false};
-std::atomic<bool> g_producerWaiting{false};
+// The tail a waiting producer needs, 0 when none. The worker wakes it only once the tail reaches
+// it: notifying after every record while the game thread waited cost the worker 396 of its busy
+// samples in g_tailMutex at 100 racers (M5 Pro), lengthening the very waits it ended.
+std::atomic<uint64_t> g_producerWaitTail{0};
 std::mutex g_headMutex;
 std::condition_variable g_headCv;
 std::mutex g_tailMutex;
@@ -117,11 +120,11 @@ void WaitForTail(uint64_t minTail, bool service) {
         {
             PerfStats::WaitScope wait;
             std::unique_lock lock{g_tailMutex};
-            g_producerWaiting.store(true, std::memory_order_seq_cst);
+            g_producerWaitTail.store(minTail, std::memory_order_seq_cst);
             if (g_tail.load(std::memory_order_seq_cst) < minTail) {
                 WaitTailBriefly(lock);
             }
-            g_producerWaiting.store(false, std::memory_order_relaxed);
+            g_producerWaitTail.store(0, std::memory_order_relaxed);
         }
         if (service && g_waitCallback != nullptr && g_tail.load(std::memory_order_acquire) < minTail) {
             g_waitCallback();
@@ -234,7 +237,8 @@ void WorkerMain() {
             }
             tail += header->size;
             g_tail.store(tail, std::memory_order_seq_cst);
-            if (g_producerWaiting.load(std::memory_order_seq_cst)) {
+            if (const uint64_t wanted = g_producerWaitTail.load(std::memory_order_seq_cst);
+                wanted != 0 && tail >= wanted) {
                 std::lock_guard lock{g_tailMutex};
                 g_tailCv.notify_all();
             }
@@ -292,6 +296,7 @@ void FlushFifo() {
 } // namespace detail
 
 void FifoWrite(uint32_t value, uint32_t sizeBytes) {
+    NoteFifoWrite(value, sizeBytes);
     const size_t at = g_fifoBytes.size();
     g_fifoBytes.resize(at + 1 + sizeof(value));
     g_fifoBytes[at] = static_cast<uint8_t>(sizeBytes);
@@ -303,6 +308,7 @@ void FifoWrite(uint32_t value, uint32_t sizeBytes) {
 }
 
 void FifoBurst(const uint8_t* data, uint32_t sizeBytes) {
+    NoteFifoBytes(data, sizeBytes);
     const size_t at = g_fifoBytes.size();
     g_fifoBytes.resize(at + 1 + sizeof(sizeBytes) + sizeBytes);
     g_fifoBytes[at] = kFifoBurstTag;

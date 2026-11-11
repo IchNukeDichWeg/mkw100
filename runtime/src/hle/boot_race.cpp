@@ -33,6 +33,8 @@ constexpr uint32_t kPlayerKartOffset = 0x8;
 constexpr uint32_t kPlayerCharacterOffset = 0xC;
 constexpr uint32_t kPlayerTypeOffset = 0x10;
 constexpr uint32_t kPlayerControllerChannelOffset = 0x6;
+constexpr uint32_t kPlayerTeamOffset = 0xCC;         // 0 red, 1 blue
+constexpr uint32_t kSettingsModeFlags = 0x28;       // bit 0x2: team mode
 constexpr uint32_t kPlayerCount = 12;
 constexpr uint32_t kSettingsOffset = 0xB48;
 
@@ -100,6 +102,7 @@ Racer SelectDiverseRacer(uint32_t index) {
 std::optional<uint32_t> g_course;
 uint32_t g_players = kPlayerCount;
 bool g_cpuDriven = false;
+bool g_teams = false;  // --race-teams: the game's own red/blue team mode
 bool g_autoDriven = false;
 bool g_lockstep = false;
 bool g_heapCheck = false;
@@ -144,6 +147,7 @@ void SetUpMenuScenario(uint32_t course) {
         Memory::Write32(player + kPlayerCharacterOffset, racer.character);
         Memory::Write32(player + kPlayerTypeOffset,
                         i >= g_players ? kPlayerNone : i == 0 ? kPlayerRealLocal : kPlayerCpu);
+        Memory::Write32(player + kPlayerTeamOffset, g_teams ? i % 2 : 0);
     }
     const uint32_t settings = scenario + kSettingsOffset;
     Memory::Write32(settings + 0x00, course);
@@ -154,7 +158,7 @@ void SetUpMenuScenario(uint32_t course) {
     Memory::Write32(settings + 0x18, kItemsBalanced);
     Memory::Write8(settings + 0x24, 0);
     Memory::Write8(settings + 0x25, 3);
-    Memory::Write32(settings + 0x28, 0);
+    Memory::Write32(settings + kSettingsModeFlags, g_teams ? 2 : 0);
 }
 
 } // namespace
@@ -176,6 +180,10 @@ bool ParseArgument(std::string_view arg) {
     }
     if (arg == "--lockstep") {
         g_lockstep = true;
+        return true;
+    }
+    if (arg == "--race-teams") {
+        g_teams = true;
         return true;
     }
     if (arg == "--heap-check") {
@@ -282,6 +290,7 @@ extern "C" void ArgumentParser_Parse_805b9344(CpuContext* ctx) {
 
     RT_LOGF("boot-race", "booting into 1P VS on course 0x%02X with %u racers%s\n", *g_course, g_players,
             g_cpuDriven ? " (CPU driven)" : g_autoDriven ? " (scripted human)" : "");
+    if (g_teams) RT_LOGF("boot-race", "team mode: racers alternate red / blue\n");
     ctx->gpr[3] = kSectionP1Vs;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x805B9344, ArgumentParser_Parse_805b9344, "ArgumentParser_Parse_805b9344");

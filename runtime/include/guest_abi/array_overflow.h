@@ -116,6 +116,11 @@ const ArrayClass& Class(uint32_t id);
 // Guest address of the class's object now (0 when it does not exist).
 uint32_t Instance(const ArrayClass& c);
 
+// The index of the element `pointer` points at in the class's array at object offset `origin`
+// (inline or in a window), or kNoArray. For mod code that turns an element address back into a
+// player index with (pointer - instance - origin) / stride, which breaks past 12.
+uint32_t ElementIndex(const ArrayClass& c, uint32_t pointer, uint32_t origin, uint32_t stride);
+
 // Zeroes every window of the class and constructs its object elements. Guest calls clobber the
 // context's registers; the caller restores them.
 void InitWindows(const ArrayClass& c, CpuContext* ctx);

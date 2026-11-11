@@ -49,6 +49,23 @@ void InitWindows(const ArrayClass& c, CpuContext* ctx) {
     }
 }
 
+uint32_t ElementIndex(const ArrayClass& c, uint32_t pointer, uint32_t origin, uint32_t stride) {
+    const uint32_t instance = Instance(c);
+    if (instance == 0) {
+        return kNoArray;
+    }
+    const uint32_t inlineOffset = pointer - instance - origin;
+    if (inlineOffset < kInlineSlots * stride && inlineOffset % stride == 0) {
+        return inlineOffset / stride;
+    }
+    // Element i >= 12 of the array at `origin` sits at Window(c, i) + origin (MKW100_IndexScaled).
+    const uint32_t windowOffset = pointer - (Window(c, kInlineSlots) + origin);
+    if (windowOffset < kWindows * c.window() && windowOffset % c.window() == 0) {
+        return kInlineSlots + windowOffset / c.window();
+    }
+    return kNoArray;
+}
+
 } // namespace ArrayOverflow
 
 using namespace ArrayOverflow;

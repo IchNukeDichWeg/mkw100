@@ -100,6 +100,8 @@ Racer SelectDiverseRacer(uint32_t index) {
 }
 
 std::optional<uint32_t> g_course;
+// Set when ArgumentParser::parse picked the race section, for Pulsar's boot hook below.
+bool g_raceSectionPicked = false;
 uint32_t g_players = kPlayerCount;
 bool g_cpuDriven = false;
 bool g_teams = false;  // --race-teams: the game's own red/blue team mode
@@ -291,10 +293,23 @@ extern "C" void ArgumentParser_Parse_805b9344(CpuContext* ctx) {
     RT_LOGF("boot-race", "booting into 1P VS on course 0x%02X with %u racers%s\n", *g_course, g_players,
             g_cpuDriven ? " (CPU driven)" : g_autoDriven ? " (scripted human)" : "");
     if (g_teams) RT_LOGF("boot-race", "team mode: racers alternate red / blue\n");
+    g_raceSectionPicked = true;
     ctx->gpr[3] = kSectionP1Vs;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x805B9344, ArgumentParser_Parse_805b9344, "ArgumentParser_Parse_805b9344");
 
+// Retro Rewind (Pulsar) replaces SectionMgr::Init's parse call with 0x8184EC74, which calls
+// ArgumentParser::parse but returns its own boot section (-1, or 0x55 for a pending license),
+// so --race booted to the title screen. Keep the race section when parse picked it.
+// The base game never calls 0x8184EC74.
+extern "C" void Pulsar_BootSection_8184ec74(CpuContext* ctx) {
+    MKW_GUEST_NEXT(8184EC74)(ctx);
+    if (g_raceSectionPicked) {
+        g_raceSectionPicked = false;
+        ctx->gpr[3] = kSectionP1Vs;
+    }
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8184EC74, Pulsar_BootSection_8184ec74, "Pulsar_BootSection_8184ec74");
 
 // --race-cpu hands the local racer to the CPU driver while it keeps its camera and HUD.
 

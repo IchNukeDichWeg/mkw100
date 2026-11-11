@@ -76,3 +76,7 @@
 0x805413D4  9  scale  28  0x0  # archive_manager 0x8
 0x80541444  9  scale  28  0x0  # archive_manager 0x158
 0x80541E5C  9  scale  28  0x0  # archive_manager 0x8
+0x81837BC8  10  scale  56  0x0  # rr_racer_state 0x0 (added by hand: Retro Rewind module, array_overflow.h)
+0x81837DE8  10  scale  56  0x0  # rr_racer_state 0x0 (added by hand: Retro Rewind module, array_overflow.h)
+0x81838350  10  scale  56  0x0  # rr_racer_state 0x0 (added by hand: Retro Rewind module, array_overflow.h)
+0x818383E4  10  scale  56  0x0  # rr_racer_state 0x0 (added by hand: Retro Rewind module, array_overflow.h)

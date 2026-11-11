@@ -20,12 +20,18 @@
 #include "memory.h"
 #include "runtime_log.h"
 
+#include <cmath>
 #include <cstdint>
 
 namespace {
 
 // Toggle for the whole change; off runs the game's own limits and cooldown at every player count.
 constexpr bool kScaleItemLimits = true;
+// Toggle: past 12 players a pulled field-hitting item (blue shell, lightning, blooper, POW) is kept
+// with probability sqrt(12 / players), otherwise the roll is redone (up to 4 times). Every one of
+// them hits most of a 100-kart field, so their per-pull rate drops too, not only their cooldown.
+// 100-racer oracle race: 14 of 648 pulls (2.2%) -> 8 of 662 (1.2%).
+constexpr bool kRarerFieldItems = true;
 constexpr uint32_t kItemStockPlayers = 12;
 constexpr uint32_t kItemRacedata = 0x809BD728;      // Racedata*, u8 player count at +0x24
 constexpr uint32_t kItemObjProperties = 0x809C2F48; // Item::ObjProperties[15]
@@ -79,3 +85,30 @@ extern "C" void ItemSlot_CanItemNotBeObtained_807bb380(CpuContext* ctx) {
     ctx->gpr[3] = frames < cooldown ? 1 : 0;
 }
 REGISTER_NATIVE_WRAPPER_AS(0x807BB380, ItemSlot_CanItemNotBeObtained_807bb380, "ItemSlot_CanItemNotBeObtained_807bb380");
+
+namespace {
+// ItemId (not ItemObjId): 7 blue shell, 8 lightning, 12 blooper, 13 POW.
+constexpr bool IsFieldItemId(uint32_t id) { return id == 7 || id == 8 || id == 12 || id == 13; }
+uint32_t gFieldRollState = 0x9E3779B9u;  // fixed seed: the oracle race stays reproducible
+uint32_t NextFieldRoll() {
+    gFieldRollState ^= gFieldRollState << 13;
+    gFieldRollState ^= gFieldRollState >> 17;
+    gFieldRollState ^= gFieldRollState << 5;
+    return gFieldRollState;
+}
+} // namespace
+
+// ItemSlotData::DecideItem(this, boxType, position, isHuman, hasTriple, player) -> ItemId.
+extern "C" void ItemSlot_DecideItem_807bb42c(CpuContext* ctx) {
+    const uint32_t players = ItemPlayerCount();
+    const CpuContext entry = *ctx;
+    MKW_GUEST_NEXT(807BB42C)(ctx);
+    if (!kRarerFieldItems || players <= kItemStockPlayers) return;
+    const double keep = std::sqrt(double(kItemStockPlayers) / double(players));
+    for (int retry = 0; retry < 4 && IsFieldItemId(ctx->gpr[3]); ++retry) {
+        if (double(NextFieldRoll()) / 4294967296.0 < keep) return;
+        *ctx = entry;
+        MKW_GUEST_NEXT(807BB42C)(ctx);
+    }
+}
+REGISTER_NATIVE_WRAPPER_AS(0x807BB42C, ItemSlot_DecideItem_807bb42c, "ItemSlot_DecideItem_807bb42c");

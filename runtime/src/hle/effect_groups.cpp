@@ -54,8 +54,7 @@ constexpr uint32_t kActivityListOffset = 0x14;          // both lists link throu
 constexpr uint32_t kSlotTable = ArrayOverflow::kNativeTables;
 constexpr uint32_t kActivityTable = kSlotTable + 0x200;
 static_assert(kMaxGroups * 4 <= kActivityTable - kSlotTable);
-static_assert(kActivityTable + kMaxGroups * kNw4rPerGroup * kActivitySize <=
-              ArrayOverflow::kNativeTables + ArrayOverflow::kClassSpan);
+static_assert(kActivityTable + kMaxGroups * kNw4rPerGroup * kActivitySize <= ArrayOverflow::kMenuText);
 
 constexpr uint32_t kGroupSize = 0x18;
 constexpr uint32_t kNew = 0x80229DCC;                   // operator new(size), the current heap

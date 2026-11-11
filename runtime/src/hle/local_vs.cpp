@@ -57,14 +57,19 @@ void Initialize() {
     local_vs_detail::thirtyFps = c.localVsThirtyFps.value_or(false);
     local_vs_detail::instantBoxes = c.localVsInstantBoxes.value_or(true);
 }
+int DesiredCount() { return local_vs_detail::desiredCount.load(); }
+void SetDesiredCount(int count) {
+    count = std::clamp(count, 1, int(PlayerSlots::kMaxPlayers));
+    local_vs_detail::desiredCount = count;
+    RuntimeConfigFile::WriteSetting("local_vs", "players", std::to_string(count));
+}
 bool UnlocksEnabled() { return !BootRace::CpuDriven() && local_vs_detail::unlocks.load(); }
 void DrawSettings() {
     using namespace local_vs_detail;
     int count = desiredCount.load();
     ImGui::SetNextItemWidth(240);
     if (ImGui::SliderInt("Racers", &count, 1, PlayerSlots::kMaxPlayers, "%d", ImGuiSliderFlags_AlwaysClamp)) {
-        desiredCount = count;
-        RuntimeConfigFile::WriteSetting("local_vs", "players", std::to_string(count));
+        SetDesiredCount(count);
     }
     ImGui::TextUnformatted("Applies when starting a new single-player VS series.");
     bool varied = diversity.load();

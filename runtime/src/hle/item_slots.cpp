@@ -8,12 +8,14 @@
 // writes rows 12.. past the 12-row allocation (it broke the next heap block at 24 players).
 //
 // For more than 12 players the remap is done here instead: the table becomes a game-allocated
-// `count`-row table, and position i (0-based) gets file row i * rows / count, so the 12 rows are
-// spread evenly over the field (positions 1-2 of 24 share row 1, 23-24 share row 12). A gameplay
-// choice, not a reconstruction: the game has no data for 13+ players. Up to 12 players the game's
-// own remap runs unchanged.
+// `count`-row table, and position i (0-based) gets the file row LocalVs::ItemRowFor picks for the
+// "item_distribution" setting. The default ("even") is i * rows / count, so the 12 rows are spread
+// evenly over the field (positions 1-2 of 24 share row 1, 23-24 share row 12). A gameplay choice,
+// not a reconstruction: the game has no data for 13+ players. Up to 12 players the game's own remap
+// runs unchanged.
 
 #include "abi_bridge.h"
+#include "local_vs.h"
 #include "guest_function_imports.h"
 #include "memory.h"
 
@@ -62,7 +64,7 @@ extern "C" void ItemSlotTable_Remap_807bad20(CpuContext* ctx) {
         throw std::runtime_error("mkw100 item slots: out of memory for the item table");
     }
     for (uint32_t position = 0; position < count; ++position) {
-        const uint32_t row = position * rows / count;
+        const uint32_t row = LocalVs::ItemRowFor(position, count, rows);
         for (uint32_t i = 0; i < kRowBytes; ++i) {
             Memory::Write8(remapped + position * kRowBytes + i, file[row * kRowBytes + i]);
         }

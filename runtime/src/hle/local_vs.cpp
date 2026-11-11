@@ -14,6 +14,7 @@
 #include <mutex>
 #include <vector>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,20 @@ std::atomic<bool> unlocks{true};
 std::atomic<bool> diversity{true};
 std::atomic<bool> thirtyFps{false};
 std::atomic<bool> instantBoxes{true};
+std::atomic<uint32_t> scoring{uint32_t(LocalVs::Scoring::ClassicSpread)};
+std::atomic<uint32_t> itemDistribution{uint32_t(LocalVs::ItemDistribution::Even)};
+// Config.toml values for the two balancing options, in enum order.
+constexpr std::array<const char*,3> scoringKeys{{"classic_spread","classic_top12","linear"}};
+constexpr std::array<const char*,3> scoringNames{{"Classic, spread over the field","Classic, top 12 only","Linear (N..1, +3/+1 for 1st/2nd)"}};
+constexpr std::array<const char*,4> itemKeys{{"even","generous","tight","classic_top11"}};
+constexpr std::array<const char*,4> itemNames{{"Even","Generous","Tight","Classic top 11"}};
+// The game's 12-player VS points (row 12 of the u8[12][12] table at 0x80890030).
+constexpr std::array<uint32_t,12> classicPoints{{15,12,10,8,7,6,5,4,3,2,1,0}};
+template <size_t N>
+uint32_t ParseKey(const std::optional<std::string>& value, const std::array<const char*,N>& keys) {
+    if (value) for (uint32_t i=0;i<N;++i) if (*value==keys[i]) return i;
+    return 0;
+}
 std::atomic<uint32_t> hudRank{0};
 std::atomic<int64_t> hudTime{0};
 std::atomic<uint32_t> simulationRate{0};
@@ -56,6 +71,42 @@ void Initialize() {
     local_vs_detail::diversity = c.localVsDiversity.value_or(true);
     local_vs_detail::thirtyFps = c.localVsThirtyFps.value_or(false);
     local_vs_detail::instantBoxes = c.localVsInstantBoxes.value_or(true);
+    local_vs_detail::scoring = local_vs_detail::ParseKey(c.localVsScoring, local_vs_detail::scoringKeys);
+    local_vs_detail::itemDistribution = local_vs_detail::ParseKey(c.localVsItemDistribution, local_vs_detail::itemKeys);
+}
+ItemDistribution CurrentItemDistribution() { return ItemDistribution(local_vs_detail::itemDistribution.load()); }
+uint32_t PointsFor(uint32_t place, uint32_t count) {
+    using namespace local_vs_detail;
+    if (place<1 || place>count) return 0;
+    switch (Scoring(scoring.load())) {
+    case Scoring::Linear:
+        return count-place+1+(place==1 ? 3 : place==2 ? 1 : 0);
+    case Scoring::ClassicTop12:
+        return place<=classicPoints.size() ? classicPoints[place-1] : 0;
+    case Scoring::ClassicSpread:
+    default: {
+        // The 12-player curve stretched over the field (1st..last -> 15..0) and scaled by
+        // count / 12, so it keeps its steep top at any size. 12 racers give the stock table.
+        if (count<2) return classicPoints[0];
+        const double x=double(place-1)*double(classicPoints.size()-1)/double(count-1);
+        const uint32_t i=std::min<uint32_t>(uint32_t(x), uint32_t(classicPoints.size()-2));
+        const double v=classicPoints[i]+(double(classicPoints[i+1])-double(classicPoints[i]))*(x-i);
+        return uint32_t(v*double(count)/double(classicPoints.size())+0.5);
+    }
+    }
+}
+uint32_t ItemRowFor(uint32_t position, uint32_t count, uint32_t rows) {
+    if (rows==0 || count==0) return 0;
+    const double t=double(position)/double(count);  // 0 for the leader, < 1 for last
+    uint32_t row;
+    switch (CurrentItemDistribution()) {
+    case ItemDistribution::Generous: row=uint32_t(double(rows)*std::sqrt(t)); break;  // back rows reach further forward
+    case ItemDistribution::Tight:    row=uint32_t(double(rows)*t*t); break;           // back rows only near the back
+    case ItemDistribution::ClassicTop11: row=position; break;                         // 1..11 stock, the rest last place
+    case ItemDistribution::Even:
+    default: row=position*rows/count; break;
+    }
+    return std::min(row, rows-1);
 }
 int DesiredCount() { return local_vs_detail::desiredCount.load(); }
 void SetDesiredCount(int count) {
@@ -94,7 +145,33 @@ void DrawSettings() {
         RuntimeConfigFile::WriteSetting("local_vs", "instant_boxes", boxes ? "true" : "false");
     }
     ImGui::Separator();
-    ImGui::TextUnformatted("Expanded scoring: N..1, plus +3 for first and +1 for second.");
+    ImGui::TextUnformatted("Balancing for races of more than 12 racers:");
+    int score = int(scoring.load());
+    ImGui::SetNextItemWidth(280);
+    if (ImGui::Combo("Scoring", &score, scoringNames.data(), int(scoringNames.size()))) {
+        scoring = uint32_t(score);
+        RuntimeConfigFile::WriteSetting("local_vs", "scoring", RuntimeConfigFile::FormatString(scoringKeys[score]));
+    }
+    {
+        const uint32_t n = std::max(13, desiredCount.load());
+        ImGui::Text("At %u racers: 1st %u, 2nd %u, 3rd %u, middle %u, last %u.", n, LocalVs::PointsFor(1,n),
+                    LocalVs::PointsFor(2,n), LocalVs::PointsFor(3,n), LocalVs::PointsFor((n+1)/2,n), LocalVs::PointsFor(n,n));
+    }
+    int items = int(itemDistribution.load());
+    ImGui::SetNextItemWidth(280);
+    if (ImGui::Combo("Item distribution", &items, itemNames.data(), int(itemNames.size()))) {
+        itemDistribution = uint32_t(items);
+        RuntimeConfigFile::WriteSetting("local_vs", "item_distribution", RuntimeConfigFile::FormatString(itemKeys[items]));
+    }
+    {
+        static constexpr std::array<const char*,4> help{{
+            "The game's 12 position rows are spread evenly over the field.",
+            "More of the field gets back-of-the-pack items.",
+            "Strong items only for the back of the field.",
+            "Places 1-11 use the stock rows; everyone behind gets last-place items."}};
+        ImGui::TextUnformatted(help[std::min<uint32_t>(uint32_t(items), 3)]);
+        ImGui::TextUnformatted("Item distribution applies from the next race.");
+    }
     std::vector<Entry> copy;
     { std::lock_guard lock(standingsMutex); copy = standings; }
     if (!copy.empty() && ImGui::BeginTable("Full race results", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(520,320))) {
@@ -273,8 +350,7 @@ extern "C" void LocalVs_UpdatePoints_8052e950(CpuContext* ctx) {
     for (uint32_t i=0;i<count;++i) {
         const uint32_t p=Player(menu,i), raceP=Player(rd+0x20,i);
         const uint32_t place=Memory::Read8(Memory::Read32(infos+4*i)+0x20);
-        const uint32_t bonus=place==1 ? 3 : place==2 ? 1 : 0;
-        const uint32_t earned=(place>=1 && place<=count) ? count-place+1+bonus : 0;
+        const uint32_t earned=LocalVs::PointsFor(place,count);
         const uint32_t previous=Memory::Read16(raceP+0xD8);
         const uint32_t total=std::min(65535u,previous+earned);
         Memory::Write16(p+0xD8,previous); Memory::Write16(p+0xDA,total);

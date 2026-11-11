@@ -11,7 +11,13 @@ bool ParseArgument(std::string_view arg);
 bool Requested();
 // `--race-cpu`: every racer is CPU driven with fixed RNG seeds, so the race is repeatable.
 bool CpuDriven();
-// `--lockstep` (with --race-cpu): from the first race frame on, VI retraces follow produced frames
+// `--race-auto`: player 0 stays a real local racer, driven by a scripted GameCube pad
+// (runtime/src/hle/auto_driver.cpp), with the same fixed RNG seeds, so human-only code paths are
+// tested and the race is repeatable.
+bool AutoDriven();
+// `--race-cpu` or `--race-auto`: a repeatable test race (fixed seeds, race oracle, lockstep allowed).
+bool Scripted();
+// `--lockstep` (with --race-cpu or --race-auto): from the first race frame on, VI retraces follow produced frames
 // instead of the wall clock (VI_HLE_EnableLockstep), so a slow host cannot change the race.
 bool Lockstep();
 // `--heap-check`: walk every ExpHeap whenever the game switches heap group ids (between the

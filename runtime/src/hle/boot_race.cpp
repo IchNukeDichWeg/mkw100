@@ -100,6 +100,7 @@ Racer SelectDiverseRacer(uint32_t index) {
 std::optional<uint32_t> g_course;
 uint32_t g_players = kPlayerCount;
 bool g_cpuDriven = false;
+bool g_autoDriven = false;
 bool g_lockstep = false;
 bool g_heapCheck = false;
 
@@ -181,6 +182,13 @@ bool ParseArgument(std::string_view arg) {
         g_heapCheck = true;
         return true;
     }
+    if (arg == "--race-auto") {
+        g_autoDriven = true;
+        if (!g_course) {
+            g_course = kLuigiCircuit;
+        }
+        return true;
+    }
     if (arg == "--race-cpu") {
         g_cpuDriven = true;
         if (!g_course) {
@@ -208,6 +216,14 @@ bool Requested() {
 
 bool CpuDriven() {
     return g_cpuDriven;
+}
+
+bool AutoDriven() {
+    return g_autoDriven && !g_cpuDriven;
+}
+
+bool Scripted() {
+    return g_cpuDriven || g_autoDriven;
 }
 
 bool Lockstep() {
@@ -265,7 +281,7 @@ extern "C" void ArgumentParser_Parse_805b9344(CpuContext* ctx) {
     }
 
     RT_LOGF("boot-race", "booting into 1P VS on course 0x%02X with %u racers%s\n", *g_course, g_players,
-            g_cpuDriven ? " (CPU driven)" : "");
+            g_cpuDriven ? " (CPU driven)" : g_autoDriven ? " (scripted human)" : "");
     ctx->gpr[3] = kSectionP1Vs;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x805B9344, ArgumentParser_Parse_805b9344, "ArgumentParser_Parse_805b9344");
@@ -333,7 +349,7 @@ REGISTER_NATIVE_FUNCTION_AS(0x80590664, KartLink_IsCPU_80590664, "KartLink_IsCPU
 extern "C" void RacedataScenario_InitRng_8052f924(CpuContext* ctx) {
     const uint32_t scenario = ctx->gpr[3];
     MKW_GUEST_FUNC(8052F924)(ctx);
-    if (g_cpuDriven) {
+    if (g_cpuDriven || g_autoDriven) {
         Memory::Write32(scenario + kSettingsOffset + 0x2C, 0x74A1B095u);
         Memory::Write32(scenario + kSettingsOffset + 0x30, 0x1234567u);
     }

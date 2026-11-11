@@ -1357,14 +1357,14 @@ int RuntimeMain(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) {
             if (std::string_view(argv[i]) != "--headless" && !BootRace::ParseArgument(argv[i])) {
                 throw std::invalid_argument(std::string("Unknown command-line option '") + argv[i] +
-                                            "'; the game runtime only accepts --race[=<course id>], --race-cpu, --race-players=N, --lockstep, --heap-check and --headless, use Config.toml through the installed host.");
+                                            "'; the game runtime only accepts --race[=<course id>], --race-cpu, --race-auto, --race-players=N, --lockstep, --heap-check and --headless, use Config.toml through the installed host.");
             }
         }
         if (g_headless && !BootRace::Requested()) {
-            throw std::invalid_argument("--headless needs --race[=<course id>] or --race-cpu");
+            throw std::invalid_argument("--headless needs --race[=<course id>], --race-cpu or --race-auto");
         }
-        if (BootRace::Lockstep() && !BootRace::CpuDriven()) {
-            throw std::invalid_argument("--lockstep needs --race-cpu");
+        if (BootRace::Lockstep() && !BootRace::Scripted()) {
+            throw std::invalid_argument("--lockstep needs --race-cpu or --race-auto");
         }
         if (g_headless) {
             AudioBackend::Instance().SetSilenced(true);

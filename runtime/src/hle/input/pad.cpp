@@ -1,3 +1,4 @@
+#include "hle/auto_driver.h"
 #include "hle_stubs.h"
 #include "memory.h"
 #include "hle/controller_status_contract.h"
@@ -117,6 +118,7 @@ extern "C" uint32_t PAD__Read_HLE(uint32_t statusPtr)
 
     FillTriggersHeldByButtons(statuses);
     InputBindings::Apply(statuses);
+    AutoDriver::FillPad(statuses[0]);  // --race-auto only
     // R26_PAD_TRACE: host-to-guest PAD sample. Do not synthesize inputs.
     // Bounded to the first 3000 reads or 24 changes to avoid per-frame logs.
     if (const char* diag = std::getenv("MKW100_R26_INPUT_DIAG"); diag && std::strcmp(diag, "1") == 0) {

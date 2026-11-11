@@ -140,7 +140,7 @@ extern "C" void Raceinfo_Update_805331b4(CpuContext* ctx) {
     const uint32_t raceinfo = ctx->gpr[3];
     MKW_GUEST_NEXT(805331B4)(ctx);
     LocalVs::TestItems(ctx, raceinfo);
-    if (!BootRace::CpuDriven() || g_done) {
+    if (!BootRace::Scripted() || g_done) {
         return;
     }
     // Boot and loading keep wall-clock retraces (they wait on retraces before any frame is

@@ -30,7 +30,7 @@ struct CpuContext;
 namespace ArrayOverflow {
 
 inline constexpr uint32_t kInlineSlots = 12;
-inline constexpr uint32_t kMaxPlayers = 100;  // PlayerSlots::kMaxPlayers
+inline constexpr uint32_t kMaxPlayers = 128;  // PlayerSlots::kMaxPlayers
 inline constexpr uint32_t kWindows = kMaxPlayers - kInlineSlots;
 // Above the player slot overflow (0x81A00000..0x82000000), below MEM2.
 inline constexpr uint32_t kShadowBase = 0x82000000;

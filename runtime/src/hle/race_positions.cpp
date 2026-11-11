@@ -30,7 +30,7 @@ constexpr uint32_t kPositionsRacedataGlobal = 0x809BD728;  // RaceConfig::spInst
 constexpr uint32_t kPositionsRaceinfoGlobal = 0x809BD730;
 constexpr uint32_t kRacePlayerCount = 0x24;       // u8, race scenario settings
 constexpr uint32_t kPositionsStackSlots = 12;          // the stack arrays' size
-constexpr uint32_t kPositionsMaxRacers = 100;
+constexpr uint32_t kPositionsMaxRacers = 128;  // PlayerSlots::kMaxPlayers
 // The function's double constants (lfd 0x160/0x168/0x170 off 0x80890000).
 constexpr uint32_t kTieBreak = 0x80890160;   // k1
 constexpr uint32_t kTimeBase = 0x80890168;   // k2
@@ -66,7 +66,7 @@ extern "C" void GMData_HandlePositionTracking_805336d8(CpuContext* ctx) {
     for (uint32_t i = 0; i < count; ++i) {
         const uint32_t player = Memory::Read32(raceinfoPlayers + i * 4);
         const uint32_t gm = Memory::Read32(Memory::Read32(Memory::Read32(self + 4) + 0xC) + i * 4);
-        const int32_t slot = static_cast<int8_t>(Memory::Read8(gm + 0x20)) - 1;
+        const int32_t slot = int32_t(Memory::Read8(gm + 0x20)) - 1;  // u8 rank, 0 = none (128 racers: rank 128 is past int8)
         if (slot < 0 || static_cast<uint32_t>(slot) >= count || placed[slot]) {
             char message[96];
             std::snprintf(message, sizeof message, "mkw100 race positions: racer %u has rank %d of %u", i, slot + 1, count);

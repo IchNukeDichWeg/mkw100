@@ -239,7 +239,8 @@ extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
     if (uint32_t custom = ctx->gpr[4], fontBmg = 0; CustomMessages::IsCustom(custom, fontBmg)) {  // custom_messages.h
         ctx->gpr[4] = fontBmg;
         MKW_GUEST_NEXT(805F8C88)(ctx);
-        ctx->gpr[3] = CustomMessages::Index(custom, ctx->gpr[3]);
+        // Not in this holder (-1): say so, and the game asks the next holder (Common.bmg) the same.
+        if (ctx->gpr[3] != 0xFFFFFFFFu) ctx->gpr[3] = CustomMessages::Index(custom, ctx->gpr[3]);
         return;
     }
     if (gSettingHelp && ctx->gpr[4] == kHelpBmg) {

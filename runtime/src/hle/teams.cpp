@@ -87,7 +87,8 @@ void NewSeries(uint32_t racers, bool repeatable) {
 
 bool Active() {
     std::lock_guard guard(g_lock);
-    return Count() >= 2 && g_teamOf.size() > Count();
+    // Expanded races only (13+ racers): up to 12 the game's own scoring and HUD run unchanged.
+    return Count() >= 2 && g_teamOf.size() > Count() && local_vs_detail::RaceCount() > 12;
 }
 
 uint32_t TeamOf(uint32_t player) {
@@ -110,6 +111,12 @@ const Colour& ColourOf(uint32_t team) {
     if (team >= kMaxTeams) return kNoColour;
     std::lock_guard guard(g_lock);
     return kColours[g_colour[team]];
+}
+
+uint32_t ColourIndexOf(uint32_t team) {
+    if (team >= kMaxTeams) return kNoTeam;
+    std::lock_guard guard(g_lock);
+    return g_colour[team];
 }
 
 std::vector<Standing> Rank(const std::vector<std::pair<uint32_t, uint32_t>>& points) {

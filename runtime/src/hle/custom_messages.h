@@ -12,6 +12,10 @@ namespace CustomMessages {
 // the font of "12th" (Race.bmg 1312). 0 for places outside that range.
 uint32_t PlaceBmg(uint32_t place);
 
+// The message id for team colour `colour` (Teams::ColourIndexOf): "Red Team", ..., in the font of
+// the player name message (Common.bmg 9501). 0 for an unknown colour.
+uint32_t TeamNameBmg(uint32_t colour);
+
 // For BMGHolder::GetMsgId(holder, bmgId): true for a custom id. `fontBmg` is the real message
 // whose INF entry it uses; after the game looks that one up, call Index for the msg index to return.
 bool IsCustom(uint32_t bmgId, uint32_t& fontBmg);

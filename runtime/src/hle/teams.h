@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+
+struct CpuContext;
 #include <utility>
 #include <vector>
 
@@ -32,6 +34,8 @@ bool Active();
 // without the menus' series setup).
 uint32_t TeamOf(uint32_t player);
 const Colour& ColourOf(uint32_t team);
+// Index of the team's colour in the fixed table (Red, Orange, Yellow, Green, Blue, Purple, Pink, Cyan).
+uint32_t ColourIndexOf(uint32_t team);
 
 struct Standing {
     uint32_t team;
@@ -46,5 +50,9 @@ void SetStandings(std::vector<Standing> standings);
 std::vector<Standing> LastStandings();
 // "[teams] ..." lines: assignment and the standings of `points`.
 void Log(const char* what, const std::vector<std::pair<uint32_t, uint32_t>>& points);
+
+// team_ui.cpp: tint a results row (CtrlRaceResult) in the team colour of `player`; does nothing
+// when teams are off. Guest calls clobber `ctx`; the caller restores it.
+void TintResultRow(CpuContext* ctx, uint32_t control, uint32_t player);
 
 } // namespace Teams

@@ -22,6 +22,9 @@ const ArrayClass& Class(uint32_t id) {
 }
 
 uint32_t Instance(const ArrayClass& c) {
+    if (c.member == kStaticObject) {
+        return c.instanceGlobal;
+    }
     const uint32_t singleton = Memory::Read32(c.instanceGlobal);
     if (c.member < 0 || singleton == 0) {
         return singleton;

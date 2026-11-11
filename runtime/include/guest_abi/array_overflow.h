@@ -40,6 +40,8 @@ inline constexpr uint32_t kShadowSize = kClassSpan * kMaxClasses;
 // The last class span is not a class's: it holds fixed-address tables the runtime gives the game in
 // place of tables sized for 12 players that live as long as the game (effect_groups.cpp).
 inline constexpr uint32_t kNativeTables = kShadowBase + (kMaxClasses - 1) * kClassSpan;
+// Its second half: runtime strings handed to the menu text lookup (vs_racers_option.cpp).
+inline constexpr uint32_t kMenuText = kNativeTables + kClassSpan / 2;
 
 inline constexpr uint32_t kNoArray = 0xFFFFFFFF;
 

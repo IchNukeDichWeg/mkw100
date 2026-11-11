@@ -1,0 +1,238 @@
+// mkw100: a "Racers" row on the VS rules page, below "Number of Races".
+//
+// Pages::VSSettings (page 0x73, ctor 0x806284C8) builds 6 controls through CreateControl
+// (0x808530B8): 5 radio rows and, for id 5, the race count UpDownControl. Its count lives at
+// page +0x3D8. Here the count becomes 7 and id 6 is built like id 5, from the same layout files
+// (VSSettingUpDownBase variant "UpDownRaceNum" and its buttons and value text), one row lower
+// (rows are 40 units apart: race count at y -60, the new row at -100). The OK button moves down
+// to stay clear of it. Nothing from the game is copied: the controls load the game's own files at
+// runtime.
+//
+// Its label is the race count's own message (BMG 3450) swapped for "Racers" while the row loads,
+// by answering that one lookup from a runtime string (BMGHolder::GetMsgId 0x805F8C88,
+// GetMsgByMsgId 0x805F8CF0, GetFontIndex 0x805F8D2C). Its value uses message 3451, the number
+// the race count shows. Changes go to LocalVs::SetDesiredCount, the setting F10 > Local VS edits.
+
+#include "abi_bridge.h"
+#include "guest_abi/array_overflow.h"
+#include "guest_abi/player_slots.h"
+#include "guest_function_imports.h"
+#include "local_vs.h"
+#include "memory.h"
+#include "runtime_log.h"
+
+#include <cstdint>
+
+namespace {
+
+constexpr uint32_t kVsControlCount = 0x3D8;      // page: internal control count, 6
+constexpr uint32_t kVsControlCursor = 0x654;     // page: next control index for AddControl
+constexpr uint32_t kVsRacersId = 6;
+constexpr uint32_t kVsUpDownHandlers = 0x1E00;   // page: change, click, select handler pointers
+constexpr uint32_t kVsTextHandler = 0x1E0C;
+constexpr uint32_t kVsStrings = 0x808AE874;      // StaticR strings used by CreateControl id 5
+constexpr uint32_t kVsVariants = 0x808AE7E8;     // +0x80: "RaceNum"
+
+constexpr uint32_t kOperatorNew = 0x80229DCC;
+constexpr uint32_t kAddControl = 0x8060246C;     // MenuInteractable: page, index, control, 0
+constexpr uint32_t kSprintf = 0x80011938;        // snprintf(buffer, size, format, ...)
+constexpr uint32_t kUpDownCtor = 0x8063E960;
+constexpr uint32_t kUpDownLoad = 0x8063EBDC;
+constexpr uint32_t kUpDownSize = 1480;
+constexpr uint32_t kUpDownId = 0x20C;            // the page's handlers read the row id here
+constexpr uint32_t kUpDownHandlerFields = 0x29C; // copies of the three handler pointers
+constexpr uint32_t kTextCtor = 0x806405D0;
+constexpr uint32_t kTextLoad = 0x806406B0;
+constexpr uint32_t kTextSize = 1140;
+constexpr uint32_t kTextInner = 0x174;           // the TextControl the UpDown displays through
+constexpr uint32_t kTextHandlerField = 0x178;
+constexpr uint32_t kTextInfoInit = 0x805CD94C;
+constexpr uint32_t kSetMessage = 0x8063DDB4;     // LayoutUIControl: control, bmg id, Text::Info*
+
+constexpr uint32_t kLabelBmg = 3450;             // "Number of Races"
+constexpr uint32_t kValueBmg = 3451;             // the number in Text::Info intToPass[0]
+constexpr uint32_t kInjectedMsg = 0x7FFF;        // msg index no BMG file reaches
+constexpr float kRowStep = 20.0f;                // measured: 40 put the row two rows below Races
+constexpr float kOkDrop = 15.0f;
+
+// "Racers" as UTF-16BE in the fixed runtime table span. Its INF entry (font and attributes) is
+// the race count label's own: a zeroed entry selected a caps-only font.
+constexpr uint32_t kLabelText = ArrayOverflow::kMenuText;
+constexpr char kLabel[] = "Racers";
+
+bool gLoadingRow = false;     // game thread only: the row's layout is loading
+uint32_t gLabelMsg = 0;       // BMG msg index of kLabelBmg, for its INF entry
+uint32_t gRow = 0;            // the row's UpDownControl on the current page, 0 when none
+uint32_t gRowText = 0;
+
+void WriteLabel() {
+    for (uint32_t i = 0; i < sizeof kLabel; ++i) Memory::Write16(kLabelText + i * 2, uint8_t(kLabel[i]));
+}
+
+uint32_t Call(CpuContext* ctx, uint32_t function) {
+    InvokeIndirectCpu(function, ctx);
+    return ctx->gpr[3];
+}
+
+void ShiftY(uint32_t control, float dy) {
+    for (uint32_t i = 0; i < 4; ++i) {
+        const uint32_t y = control + 4 + i * 0x18 + 4;
+        Memory::WriteFloat32(y, Memory::ReadFloat32(y) + dy);
+    }
+}
+
+// The arrow buttons and the value text are children (UIControl childrenGroup at +0x68: array at
+// +0, count at +0x10) with their own positions, so they move with the row explicitly.
+void ShiftTree(uint32_t control, float dy) {
+    ShiftY(control, dy);
+    const uint32_t children = Memory::Read32(control + 0x68);
+    const uint32_t count = Memory::Read32(control + 0x78);
+    for (uint32_t i = 0; children != 0 && i < count && i < 8; ++i) {
+        const uint32_t child = Memory::Read32(children + i * 4);
+        if (child != 0) ShiftTree(child, dy);
+    }
+}
+
+uint32_t BuildRow(CpuContext* ctx, uint32_t page) {
+    const CpuContext entry = *ctx;
+    const uint32_t sp = entry.gpr[1] - 0x80;
+    Memory::Write32(sp, entry.gpr[1]);
+    ctx->gpr[1] = sp;
+    const CpuContext base = *ctx;
+
+    *ctx = base; ctx->gpr[3] = kUpDownSize; const uint32_t row = Call(ctx, kOperatorNew);
+    *ctx = base; ctx->gpr[3] = kTextSize; const uint32_t text = Call(ctx, kOperatorNew);
+    if (row == 0 || text == 0) { *ctx = entry; return 0; }
+    *ctx = base; ctx->gpr[3] = row; Call(ctx, kUpDownCtor);
+    *ctx = base; ctx->gpr[3] = text; Call(ctx, kTextCtor);
+    // Set before Load: Load already fires the change handlers with the initial option.
+    gRow = row;
+    gRowText = text;
+
+    const uint32_t index = Memory::Read32(page + kVsControlCursor);
+    Memory::Write32(page + kVsControlCursor, index + 1);
+    *ctx = base; ctx->gpr[3] = page; ctx->gpr[4] = index; ctx->gpr[5] = row; ctx->gpr[6] = 0;
+    Call(ctx, kAddControl);
+
+    // Variant name "UpDownRaceNum" in the frame's scratch area.
+    const uint32_t variant = sp + 0x40;
+    *ctx = base; ctx->gpr[3] = variant; ctx->gpr[4] = 16; ctx->gpr[5] = kVsStrings + 93;
+    ctx->gpr[6] = Memory::Read32(kVsVariants + 128); ctx->cr &= ~(1u << (31 - 6));
+    Call(ctx, kSprintf);
+
+    const uint32_t count = PlayerSlots::kMaxPlayers;
+    *ctx = base;
+    ctx->gpr[3] = row; ctx->gpr[4] = count; ctx->gpr[5] = uint32_t(LocalVs::DesiredCount() - 1);
+    ctx->gpr[6] = kVsStrings + 102; ctx->gpr[7] = kVsStrings + 110; ctx->gpr[8] = variant;
+    ctx->gpr[9] = kVsStrings + 130; ctx->gpr[10] = kVsStrings + 153;
+    Memory::Write32(sp + 8, kVsStrings + 165); Memory::Write32(sp + 12, kVsStrings + 188);
+    Memory::Write32(sp + 16, text + kTextInner); Memory::Write32(sp + 20, 1);
+    Memory::Write32(sp + 24, 0); Memory::Write32(sp + 28, 0);
+    Memory::Write32(sp + 32, 1); Memory::Write32(sp + 36, 1);
+    WriteLabel();
+    gLoadingRow = true;
+    Call(ctx, kUpDownLoad);
+    gLoadingRow = false;
+    for (uint32_t k = 0; k < 3; ++k) {
+        Memory::Write32(row + kUpDownHandlerFields + k * 4, Memory::Read32(page + kVsUpDownHandlers + k * 4));
+    }
+    Memory::Write32(row + kUpDownId, 1);
+
+    *ctx = base;
+    ctx->gpr[3] = text; ctx->gpr[4] = kVsStrings + 199; ctx->gpr[5] = kVsStrings + 207;
+    ctx->gpr[6] = kVsStrings + 228; ctx->gpr[7] = kVsStrings + 234; ctx->gpr[8] = kVsStrings + 254;
+    Call(ctx, kTextLoad);
+    Memory::Write32(text + kTextHandlerField, Memory::Read32(page + kVsTextHandler));
+
+    ShiftTree(row, -kRowStep);
+    RT_LOGF("vs-racers", "racers row built: control %08X, %u options, value %d\n", row, count, LocalVs::DesiredCount());
+    *ctx = entry;
+    return row;
+}
+
+void SetRowValue(CpuContext* ctx, uint32_t textControl, uint32_t option) {
+    const CpuContext entry = *ctx;
+    const uint32_t sp = entry.gpr[1] - 0x100;
+    Memory::Write32(sp, entry.gpr[1]);
+    ctx->gpr[1] = sp;
+    const uint32_t info = sp + 0x10;
+    ctx->gpr[3] = info; Call(ctx, kTextInfoInit);
+    Memory::Write32(info, option + 1);
+    ctx->gpr[1] = sp; ctx->gpr[3] = textControl; ctx->gpr[4] = kValueBmg; ctx->gpr[5] = info;
+    Call(ctx, kSetMessage);
+    *ctx = entry;
+}
+
+} // namespace
+
+extern "C" void VsSettings_Ctor_806284c8(CpuContext* ctx) {
+    const uint32_t page = ctx->gpr[3];
+    MKW_GUEST_NEXT(806284C8)(ctx);
+    Memory::Write32(page + kVsControlCount, kVsRacersId + 1);
+    gRow = gRowText = 0;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x806284C8, VsSettings_Ctor_806284c8, "VsSettings_Ctor_806284c8");
+
+extern "C" void VsSettings_CreateControl_808530b8(CpuContext* ctx) {
+    if (ctx->gpr[4] != kVsRacersId) {
+        MKW_GUEST_NEXT(808530B8)(ctx);
+        return;
+    }
+    ctx->gpr[3] = BuildRow(ctx, ctx->gpr[3]);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x808530B8, VsSettings_CreateControl_808530b8, "VsSettings_CreateControl_808530b8");
+
+// The OK button, the page's only external control, moves below the new row.
+extern "C" void VsSettings_CreateExternalControl_80853028(CpuContext* ctx) {
+    MKW_GUEST_NEXT(80853028)(ctx);
+    if (ctx->gpr[3] != 0) ShiftY(ctx->gpr[3], -kOkDrop);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80853028, VsSettings_CreateExternalControl_80853028, "VsSettings_CreateExternalControl_80853028");
+
+// OnUpDownChange(page, control, hudSlot, option): the race count's handler stores the option in
+// the license; the new row's option is the racer count minus one.
+extern "C" void VsSettings_OnUpDownChange_80853998(CpuContext* ctx) {
+    if (gRow != 0 && ctx->gpr[4] == gRow) {
+        LocalVs::SetDesiredCount(int(ctx->gpr[6]) + 1);
+        return;
+    }
+    MKW_GUEST_NEXT(80853998)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80853998, VsSettings_OnUpDownChange_80853998, "VsSettings_OnUpDownChange_80853998");
+
+// OnTextChange(page, textControl, option): the race count's looks the option up in its own table.
+extern "C" void VsSettings_OnTextChange_80853a10(CpuContext* ctx) {
+    // The handler gets the value's inner TextControl (text +0x17C), so match the whole object.
+    if (gRowText != 0 && ctx->gpr[4] - gRowText < kTextSize) {
+        SetRowValue(ctx, ctx->gpr[4], ctx->gpr[5]);
+        return;
+    }
+    MKW_GUEST_NEXT(80853A10)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80853A10, VsSettings_OnTextChange_80853a10, "VsSettings_OnTextChange_80853a10");
+
+extern "C" void BmgHolder_GetMsgId_805f8c88(CpuContext* ctx) {
+    if (gLoadingRow && ctx->gpr[4] == kLabelBmg) {
+        MKW_GUEST_NEXT(805F8C88)(ctx);
+        gLabelMsg = ctx->gpr[3];
+        ctx->gpr[3] = kInjectedMsg;
+        return;
+    }
+    MKW_GUEST_NEXT(805F8C88)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x805F8C88, BmgHolder_GetMsgId_805f8c88, "BmgHolder_GetMsgId_805f8c88");
+
+extern "C" void BmgHolder_GetMsgByMsgId_805f8cf0(CpuContext* ctx) {
+    if (ctx->gpr[4] == kInjectedMsg) {
+        ctx->gpr[3] = kLabelText;
+        return;
+    }
+    MKW_GUEST_NEXT(805F8CF0)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x805F8CF0, BmgHolder_GetMsgByMsgId_805f8cf0, "BmgHolder_GetMsgByMsgId_805f8cf0");
+
+extern "C" void BmgHolder_GetFontIndex_805f8d2c(CpuContext* ctx) {
+    if (ctx->gpr[4] == kInjectedMsg) ctx->gpr[4] = gLabelMsg;
+    MKW_GUEST_NEXT(805F8D2C)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x805F8D2C, BmgHolder_GetFontIndex_805f8d2c, "BmgHolder_GetFontIndex_805f8d2c");

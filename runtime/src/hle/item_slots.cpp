@@ -74,3 +74,21 @@ extern "C" void ItemSlotTable_Remap_807bad20(CpuContext* ctx) {
     *ctx = saved;
 }
 REGISTER_NATIVE_WRAPPER_AS(0x807BAD20, ItemSlotTable_Remap_807bad20, "ItemSlotTable_Remap_807bad20");
+
+// Retro Rewind overlays ItemSlotTable::DecideRouletteItem (0x807BB8D0): it reads the roulette list
+// of the racer's position from a 12-row table (+0x2C, 0x50 per row) that its own build code makes,
+// so position 13+ read past it (24 racers: a garbage list, then a garbage item count crashed).
+// Under a mod overlay, past 12 players the position is mapped to the row the item tables use for
+// it. The base game's own function is left alone.
+extern "C" void ItemSlotTable_DecideRouletteItem_807bb8d0(CpuContext* ctx) {
+    static const bool overlaid = GuestFunctions::NextTranslation(MKW_GADDR(807BB8D0)) !=
+                                 GuestFunctions::BaseTranslation(MKW_GADDR(807BB8D0));
+    const uint32_t count = Memory::Read32(ctx->gpr[3] + kPlayerCountOffset);
+    const uint32_t position = ctx->gpr[5];
+    if (overlaid && count > kItemMapPlayers && position > kItemMapPlayers && position <= count) {
+        ctx->gpr[5] = LocalVs::ItemRowFor(position - 1, count, kItemMapPlayers) + 1;
+    }
+    MKW_GUEST_NEXT(807BB8D0)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x807BB8D0, ItemSlotTable_DecideRouletteItem_807bb8d0,
+                           "ItemSlotTable_DecideRouletteItem_807bb8d0");

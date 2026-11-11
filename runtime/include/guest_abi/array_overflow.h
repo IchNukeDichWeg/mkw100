@@ -44,12 +44,15 @@ inline constexpr uint32_t kNativeTables = kShadowBase + (kMaxClasses - 1) * kCla
 inline constexpr uint32_t kMenuText = kNativeTables + kClassSpan / 2;
 
 inline constexpr uint32_t kNoArray = 0xFFFFFFFF;
+// ArrayClass::member for a static object: instanceGlobal is the object itself, not a pointer to it.
+inline constexpr int32_t kStaticObject = -2;
 
 struct ArrayClass {
     uint32_t id;
     const char* name;
     uint32_t instanceGlobal;  // guest address of the singleton pointer
-    int32_t member;           // >= 0: the object is the pointer at *instanceGlobal + member
+    int32_t member;           // >= 0: the object is the pointer at *instanceGlobal + member;
+                              // kStaticObject: the object is at instanceGlobal
     uint32_t arraysBegin;     // object offset of the first array
     uint32_t arraysEnd;       // end of element 0 of the last array
     uint32_t elementCtor;     // nonzero: guest ctor (this only) of the elements of the arrays at ctorArrays
@@ -87,6 +90,12 @@ inline constexpr ArrayClass kClasses[] = {
     // archive path formatted from "HomeButton.arc"'s bytes). The ctor builds both arrays with
     // 0x8053FF14 (ArchivesHolder(1)), which allocates on the current heap.
     {9, "archive_manager", 0x809BD738, -1, 0x8, 0x174, 0x8053FF14, {0x8, 0x158}},
+    // Retro Rewind's Code.pul: a static per-racer state table at 0x8189FC60, 0x38 bytes per racer
+    // (a heap pointer, u16 fields at 0x1C..0x2E), indexed by Kart::Link::GetPlayerIdx at
+    // 0x81837BC8, 0x81837DE8, 0x81838350 and 0x818383E4. Sized for 12: racers 12+ overwrote the
+    // module's other data, and racer 25's record a Pulsar hook list node (26 racers jumped to 0).
+    // Not in array-classes.tsv: array_sites.py only handles singletons; its sites are hand-listed.
+    {10, "rr_racer_state", 0x8189FC60, kStaticObject, 0x0, 0x38, 0, {kNoArray, kNoArray}},
 };
 
 constexpr bool ValidTable() {
@@ -112,6 +121,11 @@ const ArrayClass& Class(uint32_t id);
 
 // Guest address of the class's object now (0 when it does not exist).
 uint32_t Instance(const ArrayClass& c);
+
+// The index of the element `pointer` points at in the class's array at object offset `origin`
+// (inline or in a window), or kNoArray. For mod code that turns an element address back into a
+// player index with (pointer - instance - origin) / stride, which breaks past 12.
+uint32_t ElementIndex(const ArrayClass& c, uint32_t pointer, uint32_t origin, uint32_t stride);
 
 // Zeroes every window of the class and constructs its object elements. Guest calls clobber the
 // context's registers; the caller restores them.

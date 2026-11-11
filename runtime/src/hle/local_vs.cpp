@@ -14,7 +14,9 @@
 #include <mutex>
 #include <vector>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace local_vs_detail {
 std::atomic<int> desiredCount{100};
@@ -103,20 +105,76 @@ void DrawSettings() {
     }
 }
 
+// The stock position counter is a layout animation with twelve pictures, and the game's
+// pictures may not be redistributed, so places past 12 are drawn here: slanted seven-segment
+// digits with an outline, gold for the podium, shading to blue towards last. Everything is
+// sized from the window height, so it stays sharp at any resolution.
+namespace {
+// Segments a b c d e f g per digit, the usual seven-segment layout.
+constexpr std::array<uint8_t,10> kSegments{{0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F}};
+
+void DrawSegmentDigit(ImDrawList* list, ImVec2 origin, float height, uint32_t digit, ImU32 fill, ImU32 outline) {
+    const float w = height * 0.5f, t = height * 0.14f, slant = height * 0.12f;
+    // Segment rectangles in a unit box (x right, y down, 0..1), slanted afterwards.
+    struct Seg { float x0, y0, x1, y1; };
+    const float h = 0.5f, tw = t / w, th = t / height;
+    const Seg segs[7] = {{tw,0,1-tw,th},{1-tw,th,1,h-th/2},{1-tw,h+th/2,1,1-th},{tw,1-th,1-tw,1},
+                         {0,h+th/2,tw,1-th},{0,th,tw,h-th/2},{tw,h-th/2,1-tw,h+th/2}};
+    auto point = [&](float x, float y) { return ImVec2(origin.x + x*w + (1-y)*slant, origin.y + y*height); };
+    for (int pass = 0; pass < 2; ++pass) {
+        const float grow = pass == 0 ? t * 0.35f : 0.0f;
+        for (int i = 0; i < 7; ++i) {
+            if (!(kSegments[digit] >> i & 1)) continue;
+            const Seg& g = segs[i];
+            const float gx = grow / w, gy = grow / height;
+            const ImVec2 q[4] = {point(g.x0-gx,g.y0-gy), point(g.x1+gx,g.y0-gy), point(g.x1+gx,g.y1+gy), point(g.x0-gx,g.y1+gy)};
+            list->AddConvexPolyFilled(q, 4, pass == 0 ? outline : fill);
+        }
+    }
+}
+
+float DrawSegmentNumber(ImDrawList* list, ImVec2 origin, float height, uint32_t value, ImU32 fill, ImU32 outline) {
+    char text[8];
+    std::snprintf(text, sizeof text, "%u", value);
+    for (const char* c = text; *c; ++c) {
+        DrawSegmentDigit(list, origin, height, uint32_t(*c - '0'), fill, outline);
+        origin.x += height * 0.72f;
+    }
+    return origin.x;
+}
+}
+
 void DrawHud() {
     using namespace local_vs_detail;
     const uint32_t packed=hudRank.load();
     if (!packed || NowMs()-hudTime.load()>250) return;
+    const uint32_t rank = packed & 255, count = packed >> 8;
     const auto* vp=ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x+vp->Size.x*0.04f, vp->Pos.y+vp->Size.y*0.80f));
-    ImGui::SetNextWindowBgAlpha(0.65f);
-    if (ImGui::Begin("##ExpandedRacePosition", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing)) {
-        ImGui::SetWindowFontScale(2.0f);
-        ImGui::Text("%u / %u", packed&255, packed>>8);
-        ImGui::SetWindowFontScale(0.85f);
-        ImGui::Text("Game speed: %u%%", simulationRate.load()*100/60);
+    ImDrawList* list = ImGui::GetForegroundDrawList();
+    const float big = vp->Size.y * 0.13f, small = big * 0.38f;
+    // Gold for 1st to 3rd, then from white-blue to deep blue towards last.
+    const float f = count > 1 ? float(rank - 1) / float(count - 1) : 0.0f;
+    const ImU32 fill = rank <= 3 ? IM_COL32(255, 205, 40, 255)
+        : IM_COL32(int(230 - 190*f), int(240 - 150*f), 255, 255);
+    const ImU32 outline = IM_COL32(15, 15, 30, 235);
+    char total[8];
+    std::snprintf(total, sizeof total, "%u", count);
+    const float width = big * 0.72f * float(rank >= 100 ? 3 : rank >= 10 ? 2 : 1) +
+                        small * 0.72f * float(std::strlen(total) + 1);
+    ImVec2 at(vp->Pos.x + vp->Size.x * 0.96f - width, vp->Pos.y + vp->Size.y * 0.80f);
+    const float end = DrawSegmentNumber(list, at, big, rank, fill, outline);
+    // "/N" in small digits on the baseline.
+    const ImVec2 slash0(end + small*0.25f, at.y + big), slash1(end + small*0.65f, at.y + big - small);
+    list->AddLine(slash0, slash1, outline, small * 0.22f);
+    list->AddLine(slash0, slash1, IM_COL32(235,235,235,255), small * 0.12f);
+    DrawSegmentNumber(list, ImVec2(end + small*0.75f, at.y + big - small), small, count, IM_COL32(235,235,235,255), outline);
+    // Game speed stays in a small corner readout.
+    const uint32_t rate = simulationRate.load();
+    if (rate) {
+        char speed[32];
+        std::snprintf(speed, sizeof speed, "Game speed %u%%", rate*100/60);
+        list->AddText(ImVec2(vp->Pos.x + vp->Size.x*0.96f - ImGui::CalcTextSize(speed).x, at.y + big + small*0.3f), IM_COL32(235,235,235,200), speed);
     }
-    ImGui::End();
 }
 
 // Opt-in integration exercise using real race objects, never enabled by a launcher.

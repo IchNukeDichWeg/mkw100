@@ -1,0 +1,16 @@
+# Singletons with inline per-player [12] arrays, relocated by scripts/mkw100/array_sites.py and
+# runtime/src/hle/array_overflow.cpp. Ids are the translator's class ids; never reuse one.
+# size is the allocation (AI::Manager::createInstance: li r3, 0x9C); it bounds the shadow window.
+# instance is the singleton pointer's guest address, or 0xGLOBAL+0xMEMBER for an object the
+# singleton points to at that member. ctor (optional): the class's constructor, whose `this` is
+# trusted as the instance; the runtime must publish the instance before it runs.
+# id  name        instance         size  arrays(offset:stride)  access-map  [ctor]
+1     ai_manager  0x809C2BE8       0x9C  0x24:4,0x54:4          docs/mkw100/ai-manager-access.tsv
+2     ai_rank     0x809C2BE8+0x84  0x194 0xE8:8                  docs/mkw100/ai-rank-access.tsv
+3     ai_sub88    0x809C2BE8+0x88  0x38  0x4:4                   docs/mkw100/ai-sub88-access.tsv
+4     ai_sub90    0x809C2BE8+0x90  0x34  0x4:4                   docs/mkw100/ai-sub90-access.tsv
+5     input_manager 0x809BD70C     0x415C 0x3B4:0x180             -
+6     item_manager 0x809C3618     0x430 0x18:4                  -  0x807992D8
+7     gesso_manager 0x809C3648    0x54  0x10:4                  -
+8     driver_manager 0x809C2F38   0x1F0 0x10:4,0x40:0xC,0xD0:4,0x100:4,0x130:4,0x178:4  docs/mkw100/driver-manager-access.tsv
+9     archive_manager 0x809BD738 0x61C 0x8:0x1C,0x158:0x1C    -

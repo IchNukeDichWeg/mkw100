@@ -79,6 +79,7 @@ output.txt
 
 /native-build-win/
 /Dependencies/
+/aurora-mkw100/
 /build-logs/
 /play/
 /UserData/

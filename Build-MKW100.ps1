@@ -72,6 +72,28 @@ function MakeJunction([string]$Target, [string]$Link) {
     }
     New-Item -ItemType Junction -Path $Link -Target $Target -ErrorAction Stop | Out-Null
 }
+function SyncPatchedAurora([string]$Shared, [string]$Private, [object[]]$Patches) {
+    # mkw100 needs aurora changes (larger per-frame GPU buffers for 128 racers), but aurora-main is
+    # a junction to a shared workspace other builds use. Mirror it into a private gitignored copy,
+    # apply patches\aurora\*.patch there, and redo that copy only when either side changes.
+    $stamp = Join-Path $Private '.mkw100-patch-stamp'
+    $want = (Get-MkwAuroraSourceFingerprint $Shared) + ';' + (($Patches | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }) -join ',')
+    if ((Test-Path -LiteralPath $stamp) -and ((Get-Content -LiteralPath $stamp -Raw).Trim() -eq $want)) {
+        Record ('Patched aurora up to date: ' + $Private)
+        return
+    }
+    & robocopy.exe $Shared $Private /MIR /XD .git /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw ('robocopy of shared aurora failed with exit ' + $LASTEXITCODE) }
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if (-not $git) { throw 'git.exe is needed to apply patches\aurora\*.patch' }
+    $rel = [IO.Path]::GetFileName($Private)
+    foreach ($patch in $Patches) {
+        & $git.Source -C $Repo apply --whitespace=nowarn ('--directory=' + $rel) $patch.FullName
+        if ($LASTEXITCODE -ne 0) { throw ('Aurora patch did not apply: ' + $patch.Name) }
+        Record ('Applied aurora patch ' + $patch.Name)
+    }
+    $want | Set-Content -LiteralPath $stamp -Encoding ASCII
+}
 function PackageBuildEvidence { Write-Host ("Build logs: " + $Logs) }
 try {
     ('MKW100 BUILD ATTEMPT: ' + (Get-Date -Format o)) | Set-Content -LiteralPath $BuildLog -Encoding UTF8
@@ -114,8 +136,16 @@ try {
     }
     $bin = Join-Path $Toolkit 'llvm-mingw\bin'
     . (Join-Path $Repo 'Launcher\NativeBuildFlags.ps1')
+    $auroraDir = Join-Path $Repo 'aurora-main'
+    $auroraPatches = @(Get-ChildItem -LiteralPath (Join-Path $Repo 'patches\aurora') -Filter '*.patch' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($auroraPatches.Count -gt 0) {
+        $auroraDir = Join-Path $Repo 'aurora-mkw100'
+        SyncPatchedAurora (Join-Path $OriginalWorkspace 'aurora-main') $auroraDir $auroraPatches
+    }
     $prebuilt = Resolve-MkwNativePrebuiltDirectory (Join-Path $Repo 'Dependencies') $bin `
-        (Join-Path $Repo 'aurora-main') (Join-Path $Repo 'runtime\third_party')
+        $auroraDir (Join-Path $Repo 'runtime\third_party')
+    # The shipped package is harvested from unpatched aurora; patching makes a source build expected.
+    if (-not $prebuilt -and $auroraPatches.Count -gt 0) { $AllowSourceDependencies = $true }
     if (-not $prebuilt -and -not $AllowSourceDependencies) {
         throw 'Existing native_prebuilt does not match the fork source/toolchain. Refusing surprise multi-GB source dependency build; rerun with -AllowSourceDependencies only if disk space permits.'
     }
@@ -153,7 +183,7 @@ try {
         -CxxCompiler (Join-Path $bin 'x86_64-w64-mingw32-clang++.exe') `
         -ResourceCompiler (Join-Path $bin 'x86_64-w64-mingw32-windres.exe') `
         -DependenciesDirectory (Join-Path $Repo 'Dependencies') -NativePrebuiltDirectory $prebuilt `
-        -AdditionalArguments @('-DMKW_TRANSLATED_COMPILE_JOBS=4','-DMKW_X86_CPU_PROFILE=v3')
+        -AdditionalArguments @('-DMKW_TRANSLATED_COMPILE_JOBS=4','-DMKW_X86_CPU_PROFILE=v3',('-DMKW_AURORA_DIR=' + $auroraDir.Replace('\','/')))
     InvokeTool $cmake $configure '06_configure'
     InvokeTool $cmake @('--build',$NativeBuild,'--target','WiiCompiled','--parallel',"$threads") '07_compile'
     $builtExe = Join-Path $NativeBuild 'WiiCompiled.exe'

@@ -5,6 +5,7 @@
 #include "guest_function_imports.h"
 #include "guest_abi/player_slots.h"
 #include "hle/custom_messages.h"
+#include "hle/teams.h"
 #include "memory.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -79,6 +80,7 @@ void Initialize() {
     local_vs_detail::scoring = local_vs_detail::ParseKey(c.localVsScoring, local_vs_detail::scoringKeys);
     local_vs_detail::itemDistribution = local_vs_detail::ParseKey(c.localVsItemDistribution, local_vs_detail::itemKeys);
     local_vs_detail::itemCycler = local_vs_detail::ParseKey(c.localVsItemCycler, local_vs_detail::cyclerKeys);
+    Teams::Initialize(c.localVsTeams.value_or(0));
 }
 ItemCycler CurrentItemCycler() { return ItemCycler(local_vs_detail::itemCycler.load()); }
 ItemDistribution CurrentItemDistribution() { return ItemDistribution(local_vs_detail::itemDistribution.load()); }
@@ -187,6 +189,28 @@ void DrawSettings() {
         RuntimeConfigFile::WriteSetting("local_vs", "item_cycler", RuntimeConfigFile::FormatString(cyclerKeys[cycler]));
     }
     ImGui::TextUnformatted("Offline only. Y + D-pad left/right picks an item (D-pad alone on a Nunchuk). By _Ro.");
+    ImGui::Separator();
+    {
+        static constexpr std::array<const char*, 8> teamNames{{"Off","2 teams","3 teams","4 teams","5 teams","6 teams","7 teams","8 teams"}};
+        int teams = Teams::Count() < 2 ? 0 : int(Teams::Count()) - 1;
+        ImGui::SetNextItemWidth(280);
+        if (ImGui::Combo("Teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(teams == 0 ? 0 : uint32_t(teams) + 1);
+        ImGui::TextUnformatted("Racers are split evenly at the start of a series; a team scores its members' average.");
+        const auto teamRows = Teams::LastStandings();
+        if (!teamRows.empty() && ImGui::BeginTable("Team standings", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Team"); ImGui::TableSetupColumn("Members");
+            ImGui::TableSetupColumn("Points"); ImGui::TableSetupColumn("Average"); ImGui::TableHeadersRow();
+            for (const auto& s : teamRows) {
+                const auto& colour = Teams::ColourOf(s.team);
+                ImGui::TableNextRow(); ImGui::TableNextColumn();
+                ImGui::TextColored(ImVec4(colour.r / 255.f, colour.g / 255.f, colour.b / 255.f, 1.f), "%s", colour.name);
+                ImGui::TableNextColumn(); ImGui::Text("%u", s.members);
+                ImGui::TableNextColumn(); ImGui::Text("%u", s.total);
+                ImGui::TableNextColumn(); ImGui::Text("%.2f", s.average);
+            }
+            ImGui::EndTable();
+        }
+    }
     std::vector<Entry> copy;
     { std::lock_guard lock(standingsMutex); copy = standings; }
     if (!copy.empty() && ImGui::BeginTable("Full race results", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(520,320))) {
@@ -331,7 +355,9 @@ void PrepareRace(uint32_t rd) {
     const bool first = Memory::Read8(menu+0xB6C)==0 || seriesCount==0;
     if (first) {
         seriesCount=desiredCount.load();
-        std::lock_guard lock(standingsMutex); standings.clear();
+        { std::lock_guard lock(standingsMutex); standings.clear(); }
+        Teams::NewSeries(seriesCount, false);
+        Teams::Log("series", {});
     }
     const uint32_t humanCharacter=Memory::Read32(Player(menu,0)+0xC);
     for (uint32_t i=0;i<PlayerSlots::kMaxPlayers;++i) {
@@ -375,6 +401,12 @@ extern "C" void LocalVs_UpdatePoints_8052e950(CpuContext* ctx) {
     std::stable_sort(rows.begin(),rows.end(),[](const Entry& a,const Entry& b){return a.place<b.place;});
     { std::lock_guard lock(standingsMutex); standings=std::move(rows); }
     RT_LOGF("local-vs", "scored %u racers without vanilla 12-player table\n",count);
+    if (Teams::Active()) {
+        std::vector<std::pair<uint32_t, uint32_t>> totals;
+        { std::lock_guard lock(standingsMutex); for (const auto& e : standings) totals.emplace_back(e.id, e.total); }
+        Teams::SetStandings(Teams::Rank(totals));
+        Teams::Log("series totals", totals);
+    }
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8052E950, LocalVs_UpdatePoints_8052e950, "LocalVs_UpdatePoints_8052e950");
 

@@ -19,6 +19,7 @@
 #include "runtime_exit.h"
 #include "runtime_log.h"
 #include "local_vs.h"
+#include "hle/teams.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -123,6 +124,14 @@ void Finish(uint32_t raceinfo, uint32_t playerCount) {
         } else {
             std::printf("[race-oracle] racer %2u place %2u time none\n", id, position);
         }
+    }
+    if (Teams::Count() >= 2) {
+        std::vector<std::pair<uint32_t, uint32_t>> points;
+        for (uint32_t id = 0; id < playerCount; ++id) {
+            const uint32_t position = Memory::Read8(Memory::Read32(players + id * 4) + kPlayerPosition);
+            points.emplace_back(id, LocalVs::PointsFor(position, playerCount));
+        }
+        Teams::Log("race", points);
     }
     std::printf("[race-oracle] lag frames %u of %u\n", g_lagFrames, g_framesSeen);
     std::printf("[race-oracle] result %016llx trajectory %016llx\n", static_cast<unsigned long long>(result),

@@ -29,7 +29,7 @@
 0x80742DA0  2  step  8  0x0  # ai_rank pointer from object+0x0, element 0 at +0x0
 0x80743094  2  step  8  0x0  # ai_rank pointer from object+0x0, element 0 at +0x0
 0x807432F4  2  step  8  0x0  # ai_rank pointer from object+0x0, element 0 at +0x0
-0x807433AC  2  step  8  0x0  # ai_rank pointer from object+0x0, element 0 at +0x0 (added by hand: human-race path, not in the CPU oracle trace)
+0x807433AC  2  step  8  0x0  # ai_rank pointer from object+0x0, element 0 at +0x0
 0x8073C354  3  scale  4  0x0  # ai_sub88 0x4
 0x8073C368  3  scale  4  0x0  # ai_sub88 0x4
 0x8073C47C  3  step  4  0x0  # ai_sub88 pointer from object+0x0, element 0 at +0x0

@@ -634,6 +634,7 @@ address	class	verdict	stride	detail
 80743158	ai_rank	unproven	60	stride 60 matches no array
 807432A0	ai_rank	unproven	8	access at object+0x148 (8074328C) is not an array element
 807432F4	ai_rank	step	8	pointer from object+0x0, element 0 at +0x0
+807433AC	ai_rank	step	8	pointer from object+0x0, element 0 at +0x0
 80743550	ai_rank	unproven	4	stride 4 matches no array
 807435A8	ai_rank	unproven	4	stride 4 matches no array
 80743610	ai_rank	unproven	4	stride 4 matches no array

@@ -1295,6 +1295,7 @@ extern "C" void GxNotifyDisplayListMemoryWrite(uint32_t addr, uint32_t size) {
 
 extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes) {
     if (nbytes == 0 || listAddr == 0) return;
+    GxWorker::MarkVtxDescUnknown();  // CP writes in the list change the vertex descriptor
     // List bytes and the arrays it indexes are GPU-side reads, so they are read when the worker runs.
     if (GxWorker::ShouldDefer()) {
         EnsureAuroraFrameActive();

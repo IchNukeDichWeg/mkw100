@@ -31,6 +31,12 @@ void Stop();
 // Stops without running queued work; bounded, for fatal exits.
 void Abandon();
 
+// Set on the game thread whenever recorded or inline work may change the CP vertex descriptor
+// behind the game thread's copy of it (FIFO writes, display lists); see gx_vertex.cpp.
+inline constinit bool g_vtxDescUnknown = true;
+inline void MarkVtxDescUnknown() noexcept {
+    if (!detail::t_onWorker) g_vtxDescUnknown = true;
+}
 inline bool Active() noexcept { return detail::g_active.load(std::memory_order_relaxed); }
 inline bool OnWorker() noexcept { return detail::t_onWorker; }
 // True when a GX entry point on this thread must be recorded instead of executed.

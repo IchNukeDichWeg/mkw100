@@ -292,6 +292,7 @@ void FlushFifo() {
 } // namespace detail
 
 void FifoWrite(uint32_t value, uint32_t sizeBytes) {
+    MarkVtxDescUnknown();
     const size_t at = g_fifoBytes.size();
     g_fifoBytes.resize(at + 1 + sizeof(value));
     g_fifoBytes[at] = static_cast<uint8_t>(sizeBytes);
@@ -303,6 +304,7 @@ void FifoWrite(uint32_t value, uint32_t sizeBytes) {
 }
 
 void FifoBurst(const uint8_t* data, uint32_t sizeBytes) {
+    MarkVtxDescUnknown();
     const size_t at = g_fifoBytes.size();
     g_fifoBytes.resize(at + 1 + sizeof(sizeBytes) + sizeBytes);
     g_fifoBytes[at] = kFifoBurstTag;

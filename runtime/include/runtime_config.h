@@ -37,6 +37,7 @@ struct RuntimeUserConfig {
     std::optional<bool> localVsDiversity;
     std::optional<bool> localVsThirtyFps;
     std::optional<bool> localVsInstantBoxes;
+    std::optional<bool> localVsImpossibleCpus;
     std::optional<std::string> localVsScoring;           // "classic_spread", "classic_top12", "linear"
     std::optional<std::string> localVsItemDistribution;  // "even", "generous", "tight", "classic_top11"
     std::optional<std::string> localVsItemCycler;        // "off", "debug", "infinite"
@@ -416,6 +417,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.localVsDiversity = FindConfigValue<bool>(document, "local_vs", "diverse_roster");
     config.localVsThirtyFps = FindConfigValue<bool>(document, "local_vs", "render_30fps");
     config.localVsInstantBoxes = FindConfigValue<bool>(document, "local_vs", "instant_boxes");
+    config.localVsImpossibleCpus = FindConfigValue<bool>(document, "local_vs", "impossible_cpus");
     config.localVsScoring = FindConfigValue<std::string>(document, "local_vs", "scoring");
     config.localVsItemDistribution = FindConfigValue<std::string>(document, "local_vs", "item_distribution");
     config.localVsItemCycler = FindConfigValue<std::string>(document, "local_vs", "item_cycler");

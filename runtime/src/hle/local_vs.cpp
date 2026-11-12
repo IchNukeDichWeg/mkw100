@@ -29,6 +29,8 @@ std::atomic<bool> unlocks{true};
 std::atomic<bool> diversity{true};
 std::atomic<bool> thirtyFps{false};
 std::atomic<bool> instantBoxes{true};
+std::atomic<bool> impossibleCpus{false};
+std::atomic<bool> impossibleBoot{false};  // --race-impossible; Initialize runs after arguments and must not clear it
 std::atomic<uint32_t> scoring{uint32_t(LocalVs::Scoring::ClassicSpread)};
 std::atomic<uint32_t> itemDistribution{uint32_t(LocalVs::ItemDistribution::Even)};
 std::atomic<uint32_t> itemCycler{uint32_t(LocalVs::ItemCycler::Off)};
@@ -79,11 +81,14 @@ void Initialize() {
     local_vs_detail::diversity = c.localVsDiversity.value_or(true);
     local_vs_detail::thirtyFps = c.localVsThirtyFps.value_or(false);
     local_vs_detail::instantBoxes = c.localVsInstantBoxes.value_or(true);
+    local_vs_detail::impossibleCpus = c.localVsImpossibleCpus.value_or(false);
     local_vs_detail::scoring = local_vs_detail::ParseKey(c.localVsScoring, local_vs_detail::scoringKeys);
     local_vs_detail::itemDistribution = local_vs_detail::ParseKey(c.localVsItemDistribution, local_vs_detail::itemKeys);
     local_vs_detail::itemCycler = local_vs_detail::ParseKey(c.localVsItemCycler, local_vs_detail::cyclerKeys);
     Teams::Initialize(c.localVsTeams.value_or(0));
 }
+bool ImpossibleCpus() { return local_vs_detail::impossibleCpus.load() || local_vs_detail::impossibleBoot.load(); }
+void SetImpossibleCpus(bool on) { local_vs_detail::impossibleBoot = on; }
 ItemCycler CurrentItemCycler() { return ItemCycler(local_vs_detail::itemCycler.load()); }
 ItemDistribution CurrentItemDistribution() { return ItemDistribution(local_vs_detail::itemDistribution.load()); }
 uint32_t PointsFor(uint32_t place, uint32_t count) {
@@ -154,6 +159,11 @@ void DrawSettings() {
     if (ImGui::Checkbox("Instant item boxes in expanded races", &boxes)) {
         instantBoxes = boxes;
         RuntimeConfigFile::WriteSetting("local_vs", "instant_boxes", boxes ? "true" : "false");
+    }
+    bool impossible = impossibleCpus.load();
+    if (ImGui::Checkbox("Impossible CPUs (replaces Hard, next race)", &impossible)) {
+        impossibleCpus = impossible;
+        RuntimeConfigFile::WriteSetting("local_vs", "impossible_cpus", impossible ? "true" : "false");
     }
     ImGui::Separator();
     ImGui::TextUnformatted("Balancing for races of more than 12 racers:");

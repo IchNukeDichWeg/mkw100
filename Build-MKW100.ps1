@@ -3,7 +3,11 @@ param(
     [Parameter(Mandatory)][string]$InstallRoot,
     [int]$Jobs = 6,
     [switch]$PreflightOnly,
-    [switch]$AllowSourceDependencies
+    [switch]$AllowSourceDependencies,
+    # A Retro Rewind release folder (RetroRewind6, holding Binaries\Code.pul): also builds the
+    # RetroRewind product, offline (no Retro-WFC payload), as scripts/mkw100/build_rr.sh does on
+    # macOS. Retro-aware shards change every base shard, so build it in its own worktree.
+    [string]$RetroRewind
 )
 # Standalone, isolated Windows fork build. Never calls LocalBuild.ps1, never
 # modifies original Install\Base or the older R13/R23 build cache.
@@ -128,6 +132,17 @@ try {
     MakeJunction (Join-Path $OriginalWorkspace 'aurora-main') (Join-Path $Repo 'aurora-main')
     MakeJunction (Join-Path $OriginalWorkspace 'Dependencies') (Join-Path $Repo 'Dependencies')
     Record 'Clean PAL inputs validated; shared Aurora/Dependencies are junctions (not copied).'
+    if ($RetroRewind) {
+        $RetroRewind = [IO.Path]::GetFullPath($RetroRewind)
+        $retroPul = Join-Path $RetroRewind 'Binaries\Code.pul'
+        Require $retroPul 'Retro Rewind Code.pul'
+        # The project's retro-rewind profile reads the pul from this workspace path, and the base
+        # leg blocks leaf inlining at every address it patches, so it must be staged first.
+        $stagedPulDir = Join-Path $Repo 'PulsarPacks\completed\RetroRewind\RetroRewind6\Binaries'
+        New-Item -ItemType Directory -Path $stagedPulDir -Force | Out-Null
+        Copy-Item -LiteralPath $retroPul -Destination (Join-Path $stagedPulDir 'Code.pul') -Force
+        Record ('Retro Rewind Code.pul staged, SHA256 ' + (Get-FileHash -LiteralPath $retroPul -Algorithm SHA256).Hash.ToLowerInvariant())
+    }
     Record ('Incremental fork cache: ' + $NativeBuild)
     if ($PreflightOnly) {
         Record 'PREFLIGHT PASSED — no translator, CMake or native compilation run.'
@@ -172,9 +187,21 @@ try {
         '--threads',"$threads") '02_translate'
     InvokeTool $dotnet.Source @('--roll-forward','Major',$translatorDll,'emit-base-manifest','--project',$project,'--out',$baseMan,
         '--functions-dir',$functions,'--translation-output-metadata',$metadata,'--region','P') '03_manifest'
+    $retroOut = Join-Path $Repo 'build\mods\retro_rewind_full_cpp'
+    if ($RetroRewind) {
+        New-Item -ItemType Directory -Path $retroOut -Force | Out-Null
+        InvokeTool $dotnet.Source @('--roll-forward','Major',$translatorDll,'translate-mod','--project',$project,'--profile','retro-rewind',
+            '--base-manifest',(Join-Path $baseMan 'mkwii_base_manifest.json'),'--base-translation-output-metadata',$metadata,
+            '--code-pul',(Join-Path $RetroRewind 'Binaries\Code.pul'),'--mod-root',$RetroRewind,'--mod-name','Retro Rewind',
+            '--region','P','--out',$retroOut,'--prefer-cached-inputs','--emit-cpp','--threads',"$threads",'--skip-retro-wfc') '03b_translate_rr'
+    }
     InvokeTool $dotnet.Source @('--roll-forward','Major',$translatorDll,'generate-data-init','--project',$project) '04_data_init'
-    InvokeTool $dotnet.Source @('--roll-forward','Major',$translatorDll,'emit-build-shards','--project',$project,'--base-metadata',$metadata,
-        '--base-functions-dir',$functions,'--native-source-dir',(Join-Path $Repo 'runtime\src'),'--out',$shards) '05_shards'
+    $shardArgs = @('--roll-forward','Major',$translatorDll,'emit-build-shards','--project',$project,'--base-metadata',$metadata,
+        '--base-functions-dir',$functions,'--native-source-dir',(Join-Path $Repo 'runtime\src'),'--out',$shards)
+    if ($RetroRewind) {
+        $shardArgs += @('--resolved-profile',(Join-Path $retroOut 'resolved_dispatch_profile.json'),'--retro-cpp-dir',(Join-Path $retroOut 'cpp'))
+    }
+    InvokeTool $dotnet.Source $shardArgs '05_shards'
     $cmake = Join-Path $Toolkit 'CMake\bin\cmake.exe'
     $configure = Get-MkwNativeConfigureArguments `
         -SourceDirectory (Join-Path $Repo 'runtime') -BuildDirectory $NativeBuild `
@@ -185,7 +212,8 @@ try {
         -DependenciesDirectory (Join-Path $Repo 'Dependencies') -NativePrebuiltDirectory $prebuilt `
         -AdditionalArguments @('-DMKW_TRANSLATED_COMPILE_JOBS=4','-DMKW_X86_CPU_PROFILE=v3',('-DMKW_AURORA_DIR=' + $auroraDir.Replace('\','/')))
     InvokeTool $cmake $configure '06_configure'
-    InvokeTool $cmake @('--build',$NativeBuild,'--target','WiiCompiled','--parallel',"$threads") '07_compile'
+    $targets = @('WiiCompiled') + $(if ($RetroRewind) { @('RetroRewind') } else { @() })
+    InvokeTool $cmake (@('--build',$NativeBuild,'--target') + $targets + @('--parallel',"$threads")) '07_compile'
     $builtExe = Join-Path $NativeBuild 'WiiCompiled.exe'
     Require $builtExe 'new mkw100 Windows executable'
     $sha = (Get-FileHash -LiteralPath $builtExe -Algorithm SHA256).Hash.ToLowerInvariant()

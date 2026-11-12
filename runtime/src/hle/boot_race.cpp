@@ -5,6 +5,7 @@
 #include "guest_abi/player_slots.h"
 #include "guest_abi/guest_region.h"
 #include "guest_function_imports.h"
+#include "local_vs.h"
 #include "memory.h"
 #include "runtime_log.h"
 #include <dolphin/pad.h> // R25_GAMEPAD_AUTOBIND
@@ -183,6 +184,10 @@ bool ParseArgument(std::string_view arg) {
     }
     if (arg == "--lockstep") {
         g_lockstep = true;
+        return true;
+    }
+    if (arg == "--race-impossible") {
+        LocalVs::SetImpossibleCpus(true);
         return true;
     }
     if (arg == "--race-teams") {

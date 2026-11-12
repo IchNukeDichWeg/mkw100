@@ -8,6 +8,9 @@ void DrawHud();
 void TestItems(CpuContext* ctx, uint32_t raceinfo);
 void PrepareRace(uint32_t racedata);
 bool UnlocksEnabled();
+// "Impossible CPUs": Hard CPUs get the faster speed and always-on action tables of ai_impossible.cpp.
+bool ImpossibleCpus();
+void SetImpossibleCpus(bool on);  // --race-impossible, for this run only
 // Racers for the next single-player VS series, 1..PlayerSlots::kMaxPlayers (F10 and the VS rules page).
 int DesiredCount();
 void SetDesiredCount(int count);

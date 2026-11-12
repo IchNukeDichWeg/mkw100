@@ -41,7 +41,8 @@ constexpr std::array<Teams::Colour, Teams::kMaxTeams> kColours{{
 }};
 constexpr Teams::Colour kNoColour{255, 255, 255, "None"};
 
-std::atomic<uint32_t> g_count{0};
+std::atomic<uint32_t> g_count{2};
+std::atomic<bool> g_teamVsRace{false};  // OnInitRace: this race is a Team VS race past 12
 std::mutex g_lock;
 std::vector<uint8_t> g_teamOf;                  // per racer
 std::array<uint8_t, Teams::kMaxTeams> g_colour{};  // team -> colour index
@@ -55,13 +56,38 @@ uint32_t RaceCount();  // local_vs.cpp: the race scenario's player count
 
 namespace {
 
-uint32_t Clamp(uint32_t teams) { return teams < 2 ? 0 : std::min(teams, Teams::kMaxTeams); }
+uint32_t Clamp(uint32_t teams) { return std::clamp(teams, 2u, Teams::kMaxTeams); }
+
+constexpr uint32_t kTeamsRacedata = 0x809BD728;     // RaceConfig::spInstance
+constexpr uint32_t kTeamsRaceModeFlags = 0x20 + 0xB70;  // race scenario settings modeFlags
+constexpr uint32_t kTeamsRaceNumber = 0x20 + 0xB6C;     // race scenario: race of the series (u8)
+constexpr uint32_t kTeamsFlag = 2;
 
 } // namespace
 
 namespace Teams {
 
 void Initialize(uint32_t teamsFromConfig) { g_count = Clamp(teamsFromConfig); }
+
+void OnInitRace(uint32_t racedata) {
+    g_teamVsRace = false;
+    if (racedata == 0) return;
+    const uint32_t flags = Memory::Read32(racedata + kTeamsRaceModeFlags);
+    if ((flags & kTeamsFlag) == 0 || local_vs_detail::RaceCount() <= 12) return;
+    // Plain VS from here (karts, HUD, item hits); team identity is ours. The menu scenario keeps
+    // the flag, so every race of the series comes back through here.
+    Memory::Write32(racedata + kTeamsRaceModeFlags, flags & ~kTeamsFlag);
+    g_teamVsRace = true;
+    bool fresh = Memory::Read8(racedata + kTeamsRaceNumber) == 0;
+    {
+        std::lock_guard guard(g_lock);
+        fresh = fresh || g_teamOf.size() != local_vs_detail::RaceCount();
+    }
+    if (fresh) {
+        NewSeries(local_vs_detail::RaceCount(), BootRace::Scripted());
+        Log("series", {});
+    }
+}
 
 uint32_t Count() { return g_count.load(); }
 
@@ -75,7 +101,7 @@ void NewSeries(uint32_t racers, bool repeatable) {
     std::lock_guard guard(g_lock);
     g_standings.clear();
     g_teamOf.assign(racers, uint8_t(kNoTeam));
-    if (teams < 2 || racers <= teams) return;
+    if (racers <= teams) return;
     std::mt19937 random(repeatable ? 0x74A1B095u
                                    : uint32_t(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::vector<uint32_t> order(racers);
@@ -87,11 +113,9 @@ void NewSeries(uint32_t racers, bool repeatable) {
 }
 
 bool Active() {
+    if (!g_teamVsRace.load() || local_vs_detail::RaceCount() <= 12) return false;
     std::lock_guard guard(g_lock);
-    // Teams belong to Team VS only (race scenario mode flags, Racedata + 0x20 + 0xB48 + 0x28, bit 2):
-    // averaged teams in solo VS read as a bug. Team VS still runs the game's red/blue
-    // (team_results.cpp) until its own 2-8 team leaderboard lands, so nothing turns this on yet.
-    return false;
+    return g_teamOf.size() > Count();
 }
 
 uint32_t TeamOf(uint32_t player) {
@@ -152,7 +176,7 @@ std::vector<Standing> LastStandings() {
 }
 
 void Log(const char* what, const std::vector<std::pair<uint32_t, uint32_t>>& points) {
-    if (Count() < 2) return;
+    if (!g_teamVsRace.load()) return;
     if (points.empty()) {
         std::array<uint32_t, kMaxTeams> sizes{};
         uint32_t racers = 0;

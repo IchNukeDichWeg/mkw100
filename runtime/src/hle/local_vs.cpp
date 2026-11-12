@@ -203,11 +203,11 @@ void DrawSettings() {
     ImGui::TextUnformatted("Offline only. Y + D-pad left/right picks an item (D-pad alone on a Nunchuk). By _Ro.");
     ImGui::Separator();
     {
-        static constexpr std::array<const char*, 8> teamNames{{"Off","2 teams","3 teams","4 teams","5 teams","6 teams","7 teams","8 teams"}};
-        int teams = Teams::Count() < 2 ? 0 : int(Teams::Count()) - 1;
+        static constexpr std::array<const char*, 7> teamNames{{"2 teams","3 teams","4 teams","5 teams","6 teams","7 teams","8 teams"}};
+        int teams = int(Teams::Count()) - 2;
         ImGui::SetNextItemWidth(280);
-        if (ImGui::Combo("Team VS teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(teams == 0 ? 0 : uint32_t(teams) + 1);
-        ImGui::TextUnformatted("Team VS only, not solo VS. Team VS still plays the game's red vs blue; 3-8 teams are coming.");
+        if (ImGui::Combo("Team VS teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(uint32_t(teams) + 2);
+        ImGui::TextUnformatted("Team VS with more than 12 racers; a team scores its members' average. Up to 12 it is the game's red vs blue.");
         const auto teamRows = Teams::LastStandings();
         if (!teamRows.empty() && ImGui::BeginTable("Team standings", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Team"); ImGui::TableSetupColumn("Members");
@@ -367,7 +367,7 @@ void PrepareRace(uint32_t rd) {
     const bool preview=gameType==5;
     bool solo = firstType == 0 || (preview && firstType == 1);
     for (uint32_t i=1;i<12;++i) solo = solo && Memory::Read32(Player(menu,i)+0x10) != 0;
-    // Offline VS, solo or the game's own Team VS (red/blue; team_results.cpp handles its results).
+    // Offline VS, solo or Team VS (past 12 racers teams.cpp takes it over after InitRace).
     const bool teamVs = (Memory::Read32(menu+0xB70)&2)!=0;
     const bool eligible = solo && Memory::Read32(menu+0xB50)==1 && (gameType==0 || preview);
     if (!eligible) {
@@ -749,3 +749,30 @@ extern "C" void LocalVs_Framerate_8051af84(CpuContext* ctx) {
     MKW_GUEST_NEXT(8051AF84)(ctx);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x8051AF84, LocalVs_Framerate_8051af84, "LocalVs_Framerate_8051af84");
+
+// GPVSLeaderboardUpdate::GetNextPage (0x8085C974): the Team VS sections go on to the team columns
+// page (0x32, TeamVSLeaderboardTotal: six rows a team); a teams race past 12 goes to the scrolling
+// standings page (0x30) instead, which lists the teams first (FillStandingsRows).
+extern "C" void LocalVs_NextPage_8085c974(CpuContext* ctx) {
+    MKW_GUEST_NEXT(8085C974)(ctx);
+    if (ctx->gpr[3] == 0x32 && Teams::Active()) ctx->gpr[3] = 0x30;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8085C974, LocalVs_NextPage_8085c974, "LocalVs_NextPage_8085c974");
+
+// Section::CreateSectionPages (0x8062C3A4, this, section id) builds a section's pages; the Team VS
+// sections have the team columns page (0x32) but no standings page (0x30), so the redirect above
+// would activate a page that was never built. Such a section also gets 0x30
+// (Section::CreateAndInitPage 0x80622D08; pages[id] at section + 8 + id * 4).
+extern "C" void LocalVs_SectionPages_8062c3a4(CpuContext* ctx) {
+    const uint32_t section = ctx->gpr[3];
+    MKW_GUEST_NEXT(8062C3A4)(ctx);
+    constexpr uint32_t kPages = 0x8;
+    if (section == 0 || Memory::Read32(section + kPages + 0x32 * 4) == 0 || Memory::Read32(section + kPages + 0x30 * 4) != 0) return;
+    const CpuContext saved = *ctx;
+    ctx->gpr[3] = section;
+    ctx->gpr[4] = 0x30;
+    InvokeIndirectCpu(MKW_GADDR(80622D08), ctx);
+    *ctx = saved;
+    RT_LOGF("local-vs", "team vs section: added the standings page\n");
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8062C3A4, LocalVs_SectionPages_8062c3a4, "LocalVs_SectionPages_8062c3a4");

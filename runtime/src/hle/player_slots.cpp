@@ -6,6 +6,7 @@
 
 #include "abi_bridge.h"
 #include "hle/cc200.h"
+#include "hle/teams.h"
 #include "guest_function_imports.h"
 #include "memory.h"
 #include "local_vs.h"
@@ -212,6 +213,7 @@ extern "C" void RaceConfig_InitRace_805302c4(CpuContext* ctx) {
     LocalVs::PrepareRace(racedata);
     MKW_GUEST_NEXT(805302C4)(ctx);
     Cc200::OnInitRace(racedata);
+    Teams::OnInitRace(racedata);
     for (uint32_t i = kInlineSlots; i < kMaxPlayers; ++i) {
         CopyPlayer(PlayerAddress(racedata, racedata + kScenarioOffsets[0], i),
                    PlayerAddress(racedata, racedata + kScenarioOffsets[1], i));

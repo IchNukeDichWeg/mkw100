@@ -6,10 +6,12 @@ struct CpuContext;
 #include <utility>
 #include <vector>
 
-// mkw100 teams for offline VS of more than 12 racers (runtime/src/hle/teams.cpp): 2..8 teams of
-// near-equal size (differing by at most one), kept for a series, scored by the average points per
-// member so uneven sizes stay fair. Team colours tint existing UI (name balloons, minimap, result
-// rows) as Retro Rewind's extended teams do; the game's own red/blue team mode stays off.
+// mkw100 teams for offline Team VS of more than 12 racers (runtime/src/hle/teams.cpp): 2..8 teams
+// of near-equal size (differing by at most one), kept for a series, scored by the average points
+// per member so uneven sizes stay fair. As Retro Rewind's extended teams do, the race runs with the
+// game's red/blue team flag cleared (plain karts, items hit everyone) and team colours tint
+// existing UI (name balloons, minimap, result rows); results go to the scrolling standings page
+// with team rows on top. Solo VS never has teams; up to 12 racers Team VS is the game's own.
 namespace Teams {
 
 inline constexpr uint32_t kMaxTeams = 8;
@@ -21,14 +23,19 @@ struct Colour {
 };
 
 void Initialize(uint32_t teamsFromConfig);
-// Configured team count: 0 = off, else 2..kMaxTeams.
+// Team VS teams past 12 racers, 2..kMaxTeams (Config.toml local_vs.teams; 0 or 1 there means 2).
 uint32_t Count();
-void SetCount(uint32_t teams);  // F10 / VS rules row; writes Config.toml
+void SetCount(uint32_t teams);  // F10; writes Config.toml
+
+// After RaceConfig::InitRace (0x805302C4): a Team VS race of more than 12 racers has the race
+// scenario's team flag cleared and becomes a teams race; the first race of a series (and a
+// headless boot) deals new teams.
+void OnInitRace(uint32_t racedata);
 
 // A new series of `racers`: shuffle racers into Count() teams and pick the colour order.
 // `repeatable` uses a fixed seed (test modes).
 void NewSeries(uint32_t racers, bool repeatable);
-// Teams in play for this race (Count() >= 2 and more racers than teams).
+// Teams in play for this race: a Team VS race of more than 12 racers (OnInitRace).
 bool Active();
 // The team of racer `player`, kNoTeam when teams are off. Assigns lazily (headless races start
 // without the menus' series setup).

@@ -26,6 +26,15 @@ void Initialize(uint32_t teamsFromConfig);
 // Team VS teams past 12 racers, 2..kMaxTeams (Config.toml local_vs.teams; 0 or 1 there means 2).
 uint32_t Count();
 void SetCount(uint32_t teams);  // F10; writes Config.toml
+// Racers per team instead (local_vs.team_size): 0 = use Count(). The teams are then
+// racers / size rounded up, 2..kMaxTeams (only 8 colours: past that the teams grow).
+uint32_t TeamSize();
+void SetTeamSize(uint32_t racers);
+// Team score: the members' average (local_vs.team_scoring "average", default) or their total.
+bool ScoreByAverage();
+void SetScoreByAverage(bool average);
+// Teams in play this series (0 when none dealt).
+uint32_t InPlay();
 
 // After RaceConfig::InitRace (0x805302C4): a Team VS race of more than 12 racers has the race
 // scenario's team flag cleared and becomes a teams race; the first race of a series (and a
@@ -48,9 +57,10 @@ struct Standing {
     uint32_t team;
     uint32_t members;
     uint32_t total;      // members' points added up
-    double average;      // total / members: the team's score
+    double average;      // total / members
+    uint32_t Score() const;  // the shown and ranked score: average (rounded) or total
 };
-// Team standings from (racer, points) pairs, best average first.
+// Team standings from (racer, points) pairs, best score first.
 std::vector<Standing> Rank(const std::vector<std::pair<uint32_t, uint32_t>>& points);
 // Last computed series standings (for the F10 table and the results page).
 void SetStandings(std::vector<Standing> standings);

@@ -42,6 +42,9 @@ constexpr std::array<Teams::Colour, Teams::kMaxTeams> kColours{{
 constexpr Teams::Colour kNoColour{255, 255, 255, "None"};
 
 std::atomic<uint32_t> g_count{2};
+std::atomic<uint32_t> g_teamSize{0};
+std::atomic<bool> g_byAverage{true};
+std::atomic<uint32_t> g_inPlay{0};
 std::atomic<bool> g_teamVsRace{false};  // OnInitRace: this race is a Team VS race past 12
 std::mutex g_lock;
 std::vector<uint8_t> g_teamOf;                  // per racer
@@ -67,7 +70,25 @@ constexpr uint32_t kTeamsFlag = 2;
 
 namespace Teams {
 
-void Initialize(uint32_t teamsFromConfig) { g_count = Clamp(teamsFromConfig); }
+void Initialize(uint32_t teamsFromConfig) {
+    const auto& c = RuntimeConfigFile::Get();
+    g_count = Clamp(teamsFromConfig);
+    g_teamSize = std::min<uint32_t>(c.localVsTeamSize.value_or(0), PlayerSlots::kMaxPlayers);
+    g_byAverage = c.localVsTeamScoring.value_or("average") != "total";
+}
+
+uint32_t TeamSize() { return g_teamSize.load(); }
+void SetTeamSize(uint32_t racers) {
+    g_teamSize = std::min<uint32_t>(racers, PlayerSlots::kMaxPlayers);
+    RuntimeConfigFile::WriteSetting("local_vs", "team_size", std::to_string(g_teamSize.load()));
+}
+bool ScoreByAverage() { return g_byAverage.load(); }
+void SetScoreByAverage(bool average) {
+    g_byAverage = average;
+    RuntimeConfigFile::WriteSetting("local_vs", "team_scoring", RuntimeConfigFile::FormatString(average ? "average" : "total"));
+}
+uint32_t InPlay() { return g_inPlay.load(); }
+uint32_t Standing::Score() const { return g_byAverage.load() ? uint32_t(average + 0.5) : total; }
 
 void OnInitRace(uint32_t racedata) {
     g_teamVsRace = false;
@@ -97,7 +118,9 @@ void SetCount(uint32_t teams) {
 }
 
 void NewSeries(uint32_t racers, bool repeatable) {
-    const uint32_t teams = Count();
+    const uint32_t size = TeamSize();
+    const uint32_t teams = size ? Clamp((racers + size - 1) / size) : Count();
+    g_inPlay = racers > teams ? teams : 0;
     std::lock_guard guard(g_lock);
     g_standings.clear();
     g_teamOf.assign(racers, uint8_t(kNoTeam));
@@ -115,7 +138,7 @@ void NewSeries(uint32_t racers, bool repeatable) {
 bool Active() {
     if (!g_teamVsRace.load() || local_vs_detail::RaceCount() <= 12) return false;
     std::lock_guard guard(g_lock);
-    return g_teamOf.size() > Count();
+    return g_inPlay.load() >= 2 && g_teamOf.size() > g_inPlay.load();
 }
 
 uint32_t TeamOf(uint32_t player) {
@@ -161,7 +184,10 @@ std::vector<Standing> Rank(const std::vector<std::pair<uint32_t, uint32_t>>& poi
         s.average = double(s.total) / double(s.members);
         result.push_back(s);
     }
-    std::stable_sort(result.begin(), result.end(), [](const Standing& a, const Standing& b) { return a.average > b.average; });
+    const bool byAverage = g_byAverage.load();
+    std::stable_sort(result.begin(), result.end(), [byAverage](const Standing& a, const Standing& b) {
+        return byAverage ? a.average > b.average : a.total > b.total;
+    });
     return result;
 }
 
@@ -186,8 +212,8 @@ void Log(const char* what, const std::vector<std::pair<uint32_t, uint32_t>>& poi
             for (uint8_t t : g_teamOf) if (t < kMaxTeams) ++sizes[t];
         }
         std::string line;
-        for (uint32_t t = 0; t < Count(); ++t) line += std::string(" ") + ColourOf(t).name + "=" + std::to_string(sizes[t]);
-        RT_LOGF("teams", "%s %u racers in %u teams:%s (racer 0 is %s)\n", what, racers, Count(), line.c_str(),
+        for (uint32_t t = 0; t < InPlay(); ++t) line += std::string(" ") + ColourOf(t).name + "=" + std::to_string(sizes[t]);
+        RT_LOGF("teams", "%s %u racers in %u teams:%s (racer 0 is %s)\n", what, racers, InPlay(), line.c_str(),
                 ColourOf(TeamOf(0)).name);
         return;
     }

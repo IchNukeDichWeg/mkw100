@@ -188,3 +188,20 @@ extern "C" void TeamUi_MapCharacterUpdate_807eb250(CpuContext* ctx) {
     *ctx = saved;
 }
 REGISTER_NATIVE_WRAPPER_AS(0x807EB250, TeamUi_MapCharacterUpdate_807eb250, "TeamUi_MapCharacterUpdate_807eb250");
+
+// AnimationGroup::PlayAnimationAtFrame(group, id, frame) from the results rows (CtrlRaceResult):
+// their colour animation repaints the row every frame over the team tint, so with teams it is
+// switched off where the row is loaded and skipped where the row is filled, as Retro Rewind's
+// extended teams do (ExtendedTeamSelectMisc.cpp, CtrlRaceResult_InitPatchAnimation /
+// CalcSkipAnimation, same call sites).
+extern "C" void TeamUi_PlayAnimation_8063c91c(CpuContext* ctx) {
+    const uint32_t lr = ctx->lr;
+    const bool load = lr == 0x807F4F78 || lr == 0x807F4F90;               // CtrlRaceResult::Load
+    const bool fill = lr == 0x807F631C || lr == 0x807F63A8 || lr == 0x807F6414;  // CtrlRaceResult::Fill
+    if ((load || fill) && Teams::Active()) {
+        Memory::Write8(ctx->gpr[3] + 0x35, 0);  // isActive = false (Load may run before teams are dealt)
+        return;
+    }
+    MKW_GUEST_NEXT(8063C91C)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8063C91C, TeamUi_PlayAnimation_8063c91c, "TeamUi_PlayAnimation_8063c91c");

@@ -14,7 +14,7 @@ uint32_t PlaceBmg(uint32_t place);
 
 // The message id for team colour `colour` (Teams::ColourIndexOf): "Red Team", ..., in the font of
 // the player name message (Common.bmg 9501). 0 for an unknown colour.
-uint32_t TeamNameBmg(uint32_t colour);
+uint32_t TeamNameBmg(uint32_t colour, bool average);
 
 // For BMGHolder::GetMsgId(holder, bmgId): true for a custom id. `fontBmg` is the real message
 // whose INF entry it uses; after the game looks that one up, call Index for the msg index to return.

@@ -18,11 +18,16 @@ namespace {
 
 constexpr uint32_t kPlaceBmgBase = 0x00FF0000;
 constexpr uint32_t kTeamBmgBase = 0x00FE0000;   // + colour index
-constexpr uint32_t kTeamIndexBase = 0x7D00;     // msg indices 0x7D00..0x7D07
+constexpr uint32_t kTeamIndexBase = 0x7D00;     // msg indices 0x7D00..0x7D0F
 constexpr uint32_t kTeamFontBmg = 9501;         // Common.bmg: the player name
 constexpr uint32_t kTeams = 8;
-constexpr const char* kTeamNames[kTeams] = {"Red Team", "Orange Team", "Yellow Team", "Green Team",
-                                            "Blue Team", "Purple Team", "Pink Team", "Cyan Team"};
+// Per colour, the plain name (total scoring) then the "avg" one (average scoring); at most 15
+// characters (kTeamTextBytes).
+constexpr uint32_t kTeamMessages = 2 * kTeams;
+constexpr const char* kTeamNames[kTeamMessages] = {
+    "Red Team", "Orange Team", "Yellow Team", "Green Team", "Blue Team", "Purple Team", "Pink Team", "Cyan Team",
+    "Red Team avg", "Orange Team avg", "Yellow Team avg", "Green Team avg",
+    "Blue Team avg", "Purple Team avg", "Pink Team avg", "Cyan Team avg"};
 constexpr uint32_t kPlaceIndexBase = 0x7E00;
 constexpr uint32_t kFirstPlace = 13;
 constexpr uint32_t kLastPlace = PlayerSlots::kMaxPlayers;
@@ -30,13 +35,14 @@ constexpr uint32_t kPlaceFontBmg = 1312;      // Race.bmg "12th"
 constexpr uint32_t kTextBytes = 16;           // per place, UTF-16BE with terminator
 // After vs_racers_option.cpp's label and help strings at kMenuText.
 constexpr uint32_t kPlaceText = ArrayOverflow::kMenuText + 0x1000;
-constexpr uint32_t kTeamText = ArrayOverflow::kMenuText + 0x1800;  // 8 x 32 bytes
+constexpr uint32_t kTeamText = ArrayOverflow::kMenuText + 0x1800;  // 16 x 32 bytes
 constexpr uint32_t kTeamTextBytes = 32;
 static_assert(kPlaceText + (PlayerSlots::kMaxPlayers - 13 + 1) * 16 <= kTeamText);  // 13th..128th
 static_assert(kPlaceIndexBase + kLastPlace < 0x7FFE);
+static_assert(kTeamText + kTeamMessages * kTeamTextBytes <= ArrayOverflow::kMenuText + 0x2000);  // team_ui strings follow
 
 std::array<uint32_t, kLastPlace + 1> g_fontIndex{};  // msg index of 1312 in the holder that asked
-std::array<uint32_t, kTeams> g_teamFontIndex{};
+std::array<uint32_t, kTeamMessages> g_teamFontIndex{};
 bool g_written = false;
 
 void WriteTexts() {
@@ -49,7 +55,7 @@ void WriteTexts() {
         const uint32_t base = kPlaceText + (place - kFirstPlace) * kTextBytes;
         for (uint32_t i = 0; i <= text.size(); ++i) Memory::Write16(base + 2 * i, i < text.size() ? uint8_t(text[i]) : 0);
     }
-    for (uint32_t team = 0; team < kTeams; ++team) {
+    for (uint32_t team = 0; team < kTeamMessages; ++team) {
         const std::string text = kTeamNames[team];
         const uint32_t base = kTeamText + team * kTeamTextBytes;
         for (uint32_t i = 0; i <= text.size(); ++i) Memory::Write16(base + 2 * i, i < text.size() ? uint8_t(text[i]) : 0);
@@ -64,10 +70,12 @@ uint32_t PlaceBmg(uint32_t place) {
     return place >= kFirstPlace && place <= kLastPlace ? kPlaceBmgBase + place : 0;
 }
 
-uint32_t TeamNameBmg(uint32_t colour) { return colour < kTeams ? kTeamBmgBase + colour : 0; }
+uint32_t TeamNameBmg(uint32_t colour, bool average) {
+    return colour < kTeams ? kTeamBmgBase + colour + (average ? kTeams : 0) : 0;
+}
 
 bool IsCustom(uint32_t bmgId, uint32_t& fontBmg) {
-    if (bmgId >= kTeamBmgBase && bmgId < kTeamBmgBase + kTeams) {
+    if (bmgId >= kTeamBmgBase && bmgId < kTeamBmgBase + kTeamMessages) {
         fontBmg = kTeamFontBmg;
         return true;
     }
@@ -78,7 +86,7 @@ bool IsCustom(uint32_t bmgId, uint32_t& fontBmg) {
 
 uint32_t Index(uint32_t bmgId, uint32_t fontMsgIndex) {
     WriteTexts();
-    if (bmgId >= kTeamBmgBase && bmgId < kTeamBmgBase + kTeams) {
+    if (bmgId >= kTeamBmgBase && bmgId < kTeamBmgBase + kTeamMessages) {
         g_teamFontIndex[bmgId - kTeamBmgBase] = fontMsgIndex;
         return kTeamIndexBase + (bmgId - kTeamBmgBase);
     }
@@ -88,7 +96,7 @@ uint32_t Index(uint32_t bmgId, uint32_t fontMsgIndex) {
 }
 
 bool Text(uint32_t msgIndex, uint32_t& text) {
-    if (msgIndex >= kTeamIndexBase && msgIndex < kTeamIndexBase + kTeams) {
+    if (msgIndex >= kTeamIndexBase && msgIndex < kTeamIndexBase + kTeamMessages) {
         text = kTeamText + (msgIndex - kTeamIndexBase) * kTeamTextBytes;
         return true;
     }
@@ -98,7 +106,7 @@ bool Text(uint32_t msgIndex, uint32_t& text) {
 }
 
 bool FontIndex(uint32_t msgIndex, uint32_t& realMsgIndex) {
-    if (msgIndex >= kTeamIndexBase && msgIndex < kTeamIndexBase + kTeams) {
+    if (msgIndex >= kTeamIndexBase && msgIndex < kTeamIndexBase + kTeamMessages) {
         realMsgIndex = g_teamFontIndex[msgIndex - kTeamIndexBase];
         return true;
     }

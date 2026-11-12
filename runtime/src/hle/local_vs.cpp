@@ -206,8 +206,23 @@ void DrawSettings() {
         static constexpr std::array<const char*, 7> teamNames{{"2 teams","3 teams","4 teams","5 teams","6 teams","7 teams","8 teams"}};
         int teams = int(Teams::Count()) - 2;
         ImGui::SetNextItemWidth(280);
-        if (ImGui::Combo("Team VS teams", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(uint32_t(teams) + 2);
-        ImGui::TextUnformatted("Team VS with more than 12 racers; a team scores its members' average. Up to 12 it is the game's red vs blue.");
+        int size = int(Teams::TeamSize());
+        int by = size ? 1 : 0;
+        static constexpr std::array<const char*, 2> byNames{{"Team count", "Team size"}};
+        ImGui::SetNextItemWidth(280);
+        if (ImGui::Combo("Team VS teams by", &by, byNames.data(), int(byNames.size()))) Teams::SetTeamSize(by ? std::max(size, 4) : 0);
+        ImGui::SetNextItemWidth(280);
+        if (!by) {
+            if (ImGui::Combo("Team count", &teams, teamNames.data(), int(teamNames.size()))) Teams::SetCount(uint32_t(teams) + 2);
+        } else if (ImGui::SliderInt("Racers per team", &size, 2, 64)) {
+            Teams::SetTeamSize(uint32_t(size));
+        }
+        int scoring = Teams::ScoreByAverage() ? 0 : 1;
+        static constexpr std::array<const char*, 2> scoringNames{{"Average per member", "Total"}};
+        ImGui::SetNextItemWidth(280);
+        if (ImGui::Combo("Team score", &scoring, scoringNames.data(), int(scoringNames.size()))) Teams::SetScoreByAverage(scoring == 0);
+        ImGui::TextUnformatted("Team VS with more than 12 racers (up to 12 it is the game's red vs blue). At most 8 teams:\n"
+                               "a team size that needs more makes the teams bigger. Average keeps uneven teams fair.");
         const auto teamRows = Teams::LastStandings();
         if (!teamRows.empty() && ImGui::BeginTable("Team standings", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Team"); ImGui::TableSetupColumn("Members");
@@ -541,9 +556,9 @@ void FillTeamRow(CpuContext* ctx, const CpuContext& saved, uint32_t pg, uint32_t
     for (const auto& e : rows) if (Teams::TeamOf(e.id) == s.team) { best = e.id; break; }  // rows: best total first
     const uint32_t control = Control(pg, row);
     FillPlace(ctx, saved, control, place, best);
-    Call(ctx, saved, 0x807F56D4, control, uint32_t(s.average + 0.5), kNumberMessage);  // FillScore: the average
+    Call(ctx, saved, 0x807F56D4, control, s.Score(), kNumberMessage);  // FillScore: average or total
     Call(ctx, saved, 0x8063DEEC, control, kGetPointPane);
-    SetPaneMessage(ctx, saved, control, kNamePane, CustomMessages::TeamNameBmg(Teams::ColourIndexOf(s.team)), 0);
+    SetPaneMessage(ctx, saved, control, kNamePane, CustomMessages::TeamNameBmg(Teams::ColourIndexOf(s.team), Teams::ScoreByAverage()), 0);
     rowPlayer[row] = best;
     Teams::TintResultRow(ctx, control, best);
     *ctx = saved;
@@ -622,7 +637,8 @@ extern "C" void LocalVs_TotalRows_8085cae8(CpuContext* ctx) {
         const uint32_t rd = Memory::Read32(MKW_GADDR(809BD728));
         for (uint32_t i = 0; i < rows.size(); ++i) Memory::Write8(rd + MKW100_PlayerSlotOffset(rows[i].id) + 0xCF8, uint8_t(i + 1));
     }
-    offset = OffsetAround(mine + uint32_t(Teams::Active() ? Teams::LastStandings().size() : 0), count);
+    // With teams the page opens at the top, on the team standings; otherwise around the player.
+    offset = Teams::Active() ? 0 : OffsetAround(mine, count);
     const CpuContext saved = *ctx;
     FillStandingsRows(ctx, saved, pg, rows);
     *ctx = saved;
